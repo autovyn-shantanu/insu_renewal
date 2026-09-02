@@ -142,7 +142,7 @@ const TransferInsuranceWorkloadPage = () => {
             const locCode = user?.branch || "1";
 
             const res = await axios.post(
-                `${BASE_URL}/Crm/getPendingTasksByExecutive`,
+                `${BASE_URL}/Crm/getPendingInsuranceByExecutive`,
                 { from_Emp_Code: fromEmpCode, Loc_Code: locCode },
                 { headers: getJsonHeaders() }
             );

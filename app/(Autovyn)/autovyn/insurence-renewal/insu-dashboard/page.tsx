@@ -1338,7 +1338,7 @@ export default function InsuranceDashboard() {
               val: r.beforeExpiry,
               icon: Clock,
               label: "Before Expiry Reminders",
-              desc: `Expiring in next ${r.beforeDays} days`,
+              desc: (appliedFromDate && appliedToDate) ? "Expiring in selected month" : `Expiring in next ${r.beforeDays} days`,
               grad: "linear-gradient(135deg,#FF9E45 0%,#FF6011 100%)",
               onClick: () =>
                 openDlg(
@@ -1351,7 +1351,7 @@ export default function InsuranceDashboard() {
               val: r.afterExpiry,
               icon: AlertCircle,
               label: "After Expiry Reminders",
-              desc: `Expired in last ${r.afterDays} days`,
+              desc: (appliedFromDate && appliedToDate) ? "Expired in selected month" : `Expired in last ${r.afterDays} days`,
               grad: "linear-gradient(135deg,#FF557F 0%,#FF1C3B 100%)",
               onClick: () =>
                 openDlg(

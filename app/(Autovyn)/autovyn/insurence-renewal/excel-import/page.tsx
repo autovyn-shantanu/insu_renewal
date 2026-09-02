@@ -4,10 +4,7 @@ import { Button } from "@/components/ui/button";
 import DataTable from "@/components/Templates/reactTable";
 import axios from "axios";
 import { useCurrentUser } from "@/app/hooks/use-current-user";
-import { FaUsers } from "react-icons/fa";
 import Swal from "sweetalert2";
-import MediumTitle from "@/components/atoms/MediumTitle";
-import SmallTitle from "@/components/atoms/smallTitle";
 import HashloaderComponent from "@/components/Templates/hashloader";
 import Image from "next/image";
 import * as XLSX from "xlsx";
@@ -180,16 +177,18 @@ const Approver2 = () => {
       setTabledata([]);
       setisLoadingonpage(true);
 
+      const cleanBranch = String(user?.branch || "").split(",")[0].trim();
       const formData = new FormData();
       formData.append("excel", excelfile, excelfile.name);
       formData.append("user", user?.name ?? "");
-      formData.append("branch", user?.branch);
+      formData.append("branch", cleanBranch);
 
       const response = await axios.post(IMPORT_API, formData, {
         headers: {
           accept: "application/json",
           compcode: user?.Comp_Code,
           name: user?.name,
+          loc_code: cleanBranch,
           // ✅ no "Content-Type" here
         },
       });
@@ -331,7 +330,12 @@ const Approver2 = () => {
           <Button variant="outline" onClick={handleErrorDataClick}>
             Non-Imported Data
           </Button>
+           
         </div>
+        <div  className="mt-0 gap-2 md:gap-3 rounded-b p-2 md:p-4 bg-white dark:bg-black 
+          border border-borderColor dark:border-borderColor-dark shadow flex flex-wrap 
+          items-center gap-4 font-bold"><span>Note :</span><span className="text-exit">Please select date only in DD/MM/YYYY Format</span></div>
+       
       </div>
 
       {/* ===== DATA TABLE ===== */}
