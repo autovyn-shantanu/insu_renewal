@@ -543,7 +543,7 @@ export default function InsuranceRenewal() {
             name="PolicyStartDate"
             value={form.PolicyStartDate}
             handleInputChange={handleInputChange}
-            disabled={true}
+            disabled={false}
           />
         </div>
 

@@ -153,15 +153,18 @@ const fmtCurrency = (v: number | null | undefined) =>
     : "—";
 
 const getApproverStatus = (row: {
-  ACNT_APPR_STATUS?: number | null;
+  ACNT_APPR_STATUS?: number | string | null;
   ACNT_APPR_REMARK?: string | null;
   ACNT_APPR_CODE?: string | null;
   ACNT_APPR_DATE?: string | null;
 }): ApproverStatus => {
-  const v = row?.ACNT_APPR_STATUS;
+  const raw = row?.ACNT_APPR_STATUS;
+  if (raw == null || raw === "") return "PENDING";
+
+  const v = Number(raw);
 
   if (v === 1) return "APPROVED";
-  if (v == null) return "PENDING";
+  if (v === 2) return "REJECTED";
 
   if (v === 0) {
     const hasMeta =
@@ -498,7 +501,7 @@ const DetailModal = ({
         prev
           ? {
               ...prev,
-              ACNT_APPR_STATUS: action === "APPROVE" ? 1 : 0,
+              ACNT_APPR_STATUS: action === "APPROVE" ? 1 : 2,
               ACNT_APPR_REMARK: apprRemark.trim(),
               ACNT_APPR_DATE: prev.ACNT_APPR_DATE ?? new Date().toISOString(),
             }
@@ -917,7 +920,7 @@ const DetailModal = ({
                     if (isUpdating) return;
                     if (!apprRemark.trim()) {
                       showToast(
-                        "Remark is required for rejecting",
+                        "Remark is required for rejection",
                         "warning",
                       );
                       return;
@@ -957,7 +960,7 @@ export default function InsuranceRenewalPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(10000);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
 
@@ -1412,18 +1415,6 @@ export default function InsuranceRenewalPage() {
               "PAYMENT_AMOUNT",
               "DAYS_TO_EXPIRY",
             ]}
-            serverMode={true}
-            serverPagination={{
-              currentPage: page,
-              pageSize,
-              totalPages,
-              totalRecords,
-            }}
-            onServerPageChange={(p: number) => setPage(p)}
-            onServerPageSizeChange={(s: number) => {
-              setPageSize(s);
-              setPage(1);
-            }}
             onRowDoubleClick={(row: any) => openDetail(row)}
           />
         </div>

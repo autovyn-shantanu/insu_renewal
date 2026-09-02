@@ -127,79 +127,73 @@ export const treeData = [
         <Image src="/sidebaricon/Admin.png" alt="Autovyn" width={25} height={25} />
       </div>
     ),
-    key: "11",
+    key: "23",
     children: [
        {
-        title: "Insurence renewal|",
-        key: "11.1",
+        title: "Insurance Renewal |",
+        key: "23.2",
         url: "/autovyn/insurence-renewal",
         children: [
-          {
-            title: "Excel Import |",
-            key: "11.1.1",
-            url: "/autovyn/insurence-renewal/excel-import",
-          },
-
            {
-            title: "View Tabel |",
-            key: "11.1.2",
-            url: "/autovyn/insurence-renewal/view-tabel",
-          },
-
-           {
-            title: "Reminders |",
-            key: "11.1.3",
-            url: "/autovyn/insurence-renewal/reminder",
-          },
-
-           {
-            title: "Insu Payment |",
-            key: "11.1.4",
-            url: "/autovyn/insurence-renewal/payment",
-          },
-           {
-            title: "Insu Account Approval |",
-            key: "11.1.5",
-            url: "/autovyn/insurence-renewal/accountapproval",
-          },
-            {
-            title: "Insu Account View |",
-            key: "11.1.6",
-            url: "/autovyn/insurence-renewal/accountview",
-          },
-
-           {
-            title: "Insu Calling View |",
-            key: "11.1.7",
-            url: "/autovyn/insurence-renewal/insucallingview",
-          },
-             {
-            title: "Insu Calling Config |",
-            key: "11.1.8",
-            url: "/autovyn/insurence-renewal/insucallingconfig",
-          },
-           {
-            title: "Insu Dashboard |",
-            key: "11.1.10",
+            title: "Dashboard |",
+            key: "23.2.9",
             url: "/autovyn/insurence-renewal/insu-dashboard",
           },
-
+          {
+            title: "Insurance Data Import |",
+            key: "23.2.1",
+            url: "/autovyn/insurence-renewal/excel-import",
+          },
            {
-            title: "Approval Grid  |",
-            key: "11.1.11",
-            url: "/autovyn/insurence-renewal/Mispunch_Approval_Grid",
+            title: "Insurance Data View |",
+            key: "23.2.3",
+            url: "/autovyn/insurence-renewal/view-tabel",
           },
-            {
-            title: "Atteandance Report  |",
-            key: "11.1.12",
-            url: "/autovyn/insurence-renewal/attendance",
+          {
+            title: "Insurance Reminder |",
+            key: "23.2.2",
+            url: "/autovyn/insurence-renewal/reminder",
           },
-
-            {
-            title: "Insu Transfer   |",
-            key: "11.1.13",
+         
+          {
+            title: "Insurance Payment |",
+            key: "23.2.4",
+            url: "/autovyn/insurence-renewal/payment",
+          },
+          {
+            title: "Account Approval |",
+            key: "23.2.5",
+            url: "/autovyn/insurence-renewal/accountapproval",
+          },
+          {
+            title: "Insurance Renewal Approved |",
+            key: "23.2.6",
+            url: "/autovyn/insurence-renewal/accountview",
+          },
+          {
+            title: "Insurance Calling Config |",
+            key: "23.2.7",
+            url: "/autovyn/insurence-renewal/insucallingconfig",
+          },
+          // {
+          //   title: "Insurance Calling View |",
+          //   key: "23.2.8",
+          //   url: "/autovyn/CRM/Insu_Renewal/insucallingview",
+          // },
+         
+          {
+            title: "CRE Transfer Work |",
+            key: "23.2.10",
             url: "/autovyn/insurence-renewal/Transfer_work",
           },
+
+            {
+            title: "Mispunch Approval Grid |",
+            key: "23.2.11",
+            url: "/autovyn/insurence-renewal/Mispunch_Approval_Grid",
+          },
+
+
         ],
       },
     ]

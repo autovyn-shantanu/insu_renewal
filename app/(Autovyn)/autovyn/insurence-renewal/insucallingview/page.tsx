@@ -210,22 +210,76 @@ function extractSpeakerFromItem(item: any) {
   );
 }
 
-function prettyMsgTime(raw?: string) {
-  if (!raw) return undefined;
-  const s = String(raw).trim();
-  if (!s) return undefined;
-  const num = Number(s);
-  if (Number.isFinite(num) && s.length >= 9) {
-    const ms = s.length > 12 ? num : num * 1000;
-    const d = new Date(ms);
-    if (!isNaN(d.getTime())) return fmtTimeOnly(d.toISOString());
+function formatTranscriptTime(
+  rawTime: any,
+  callStartTime?: string | null,
+  msgIndex: number = 0
+): string | undefined {
+  let baseDate: Date | null = null;
+  if (callStartTime) {
+    const s = String(callStartTime).trim().replace(" ", "T");
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      baseDate = d;
+    }
   }
-  const d2 = new Date(s);
-  if (!isNaN(d2.getTime())) return fmtTimeOnly(d2.toISOString());
-  return s.length > 12 ? undefined : s;
+
+  // If rawTime is already formatted 12-hour string (e.g. "10:30 PM" or "2:15 AM")
+  if (typeof rawTime === "string" && /^\d{1,2}:\d{2}\s*(AM|PM|am|pm)$/i.test(rawTime.trim())) {
+    return rawTime.trim().toUpperCase();
+  }
+
+  // If rawTime is a full ISO date or datetime string with '-' or '/'
+  if (typeof rawTime === "string" && (rawTime.includes("-") || rawTime.includes("/")) && rawTime.length >= 10) {
+    const d = new Date(rawTime.replace(" ", "T"));
+    if (!isNaN(d.getTime())) {
+      return fmtTimeOnly(d.toISOString());
+    }
+  }
+
+  let offsetSeconds = 0;
+  let hasValidOffset = false;
+
+  if (rawTime !== undefined && rawTime !== null && rawTime !== "") {
+    const str = String(rawTime).trim();
+    if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(str)) {
+      const parts = str.split(":").map(Number);
+      if (parts.length === 2) offsetSeconds = parts[0] * 60 + parts[1];
+      else if (parts.length === 3) offsetSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      hasValidOffset = true;
+    } else {
+      const num = Number(str);
+      if (Number.isFinite(num)) {
+        if (num > 1000000000000) {
+          const d = new Date(num);
+          if (!isNaN(d.getTime())) return fmtTimeOnly(d.toISOString());
+        } else if (num > 1000000000) {
+          const d = new Date(num * 1000);
+          if (!isNaN(d.getTime())) return fmtTimeOnly(d.toISOString());
+        } else {
+          offsetSeconds = num > 10000 ? num / 1000 : num;
+          hasValidOffset = true;
+        }
+      }
+    }
+  }
+
+  if (baseDate) {
+    const effectiveOffset = hasValidOffset ? offsetSeconds : (msgIndex * 6);
+    const msgDate = new Date(baseDate.getTime() + effectiveOffset * 1000);
+    return fmtTimeOnly(msgDate.toISOString());
+  }
+
+  if (hasValidOffset) {
+    const mins = Math.floor(offsetSeconds / 60);
+    const secs = Math.floor(offsetSeconds % 60);
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+
+  return undefined;
 }
 
-function transcriptToWhatsappMessages(transcript: any): TranscriptMsg[] {
+function transcriptToWhatsappMessages(transcript: any, callStartTime?: string | null): TranscriptMsg[] {
   if (!transcript) return [];
   const parsed = tryParseJSON(transcript);
 
@@ -244,11 +298,14 @@ function transcriptToWhatsappMessages(transcript: any): TranscriptMsg[] {
               ? "out"
               : "in");
         if (!sideGuess) fallbackToggle = side === "in" ? "out" : "in";
+        const rawTime = extractTimeFromItem(item);
+        const computedTime = formatTranscriptTime(rawTime, callStartTime, idx);
+
         return {
           side,
           text: text || safeJson(item) || "—",
           speaker: speaker || undefined,
-          time: String(extractTimeFromItem(item) || "").trim() || undefined,
+          time: computedTime || undefined,
         };
       })
       .filter((m) => m.text && m.text !== "—");
@@ -260,19 +317,25 @@ function transcriptToWhatsappMessages(transcript: any): TranscriptMsg[] {
       (parsed as any).messages ||
       (parsed as any).transcript ||
       (parsed as any).data;
-    if (Array.isArray(arr)) return transcriptToWhatsappMessages(arr);
-    return [{ side: "in", text: safeJson(parsed) || "—" }];
+    if (Array.isArray(arr)) return transcriptToWhatsappMessages(arr, callStartTime);
+    return [{ side: "in", text: safeJson(parsed) || "—", time: formatTranscriptTime(undefined, callStartTime, 0) }];
   }
 
   const str = String(parsed || "").trim();
   if (!str) return [];
-  return [{ side: "in", text: str }];
+  return [{ side: "in", text: str, time: formatTranscriptTime(undefined, callStartTime, 0) }];
 }
 
-const WhatsappTranscript = ({ transcript }: { transcript: any }) => {
+const WhatsappTranscript = ({
+  transcript,
+  callStartTime,
+}: {
+  transcript: any;
+  callStartTime?: string | null;
+}) => {
   const msgs = useMemo(
-    () => transcriptToWhatsappMessages(transcript),
-    [transcript],
+    () => transcriptToWhatsappMessages(transcript, callStartTime),
+    [transcript, callStartTime],
   );
 
   if (!msgs.length) {
@@ -288,7 +351,7 @@ const WhatsappTranscript = ({ transcript }: { transcript: any }) => {
     <div className="max-h-[380px] overflow-y-auto rounded-lg bg-[#EFEAE2] p-3 space-y-2.5">
       {msgs.map((m, idx) => {
         const isOut = m.side === "out";
-        const t = prettyMsgTime(m.time);
+        const t = m.time;
         return (
           <div
             key={idx}
@@ -516,7 +579,10 @@ const SubPanel = ({
           )}
 
           {type === "transcript" && (
-            <WhatsappTranscript transcript={row?.transcript} />
+            <WhatsappTranscript
+              transcript={row?.transcript}
+              callStartTime={row?.start_time || row?.triggered_at || row?.created_at}
+            />
           )}
 
           {type === "summary" && (
@@ -791,11 +857,10 @@ const CustomerCallsModal = ({
                               setSubPanel({ type: "transcript", row: r })
                             }
                             className={`w-8 h-8 rounded-full border flex items-center justify-center mx-auto transition group
-      ${
-        hasTranscript
-          ? "border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 cursor-pointer"
-          : "border-slate-200 cursor-not-allowed opacity-40"
-      }`}
+      ${hasTranscript
+                                ? "border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 cursor-pointer"
+                                : "border-slate-200 cursor-not-allowed opacity-40"
+                              }`}
                             title={
                               hasTranscript
                                 ? "View Transcript"
@@ -805,11 +870,10 @@ const CustomerCallsModal = ({
                           >
                             <FileText
                               size={14}
-                              className={`transition ${
-                                hasTranscript
-                                  ? "text-indigo-400 group-hover:text-indigo-600"
-                                  : "text-slate-300"
-                              }`}
+                              className={`transition ${hasTranscript
+                                ? "text-indigo-400 group-hover:text-indigo-600"
+                                : "text-slate-300"
+                                }`}
                             />
                           </button>
                         </td>
@@ -822,10 +886,9 @@ const CustomerCallsModal = ({
                               setSubPanel({ type: "summary", row: r })
                             }
                             className={`w-8 h-8 rounded-full border flex items-center justify-center mx-auto transition group
-                              ${
-                                hasSummary
-                                  ? "border-blue-300 hover:border-blue-500 hover:bg-blue-50 cursor-pointer"
-                                  : "border-slate-200 cursor-not-allowed opacity-40"
+                              ${hasSummary
+                                ? "border-blue-300 hover:border-blue-500 hover:bg-blue-50 cursor-pointer"
+                                : "border-slate-200 cursor-not-allowed opacity-40"
                               }`}
                             title={hasSummary ? "View Summary" : "No summary"}
                             disabled={!hasSummary}
@@ -984,7 +1047,7 @@ export default function CallingDashboardPage() {
         CUSTOMERS_URL,
         { search, page: 1, pageSize: 100 },
         {
-       
+
           headers: {
             accept: "application/json",
             "Content-Type": "application/json",
@@ -992,9 +1055,9 @@ export default function CallingDashboardPage() {
             name: user?.name,
             loc_code: user?.branch || "",
           },
-        
+
         },
-     
+
       );
       if (!res.data?.ok) {
         setCustomers([]);

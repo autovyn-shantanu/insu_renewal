@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import SelectSearch from "@/components/atoms/Select";
 import { Button } from "@/components/ui/button";
-import ServiceTabel from "@/components/Templates/servicetable";
+import ServiceTabel from "@/components/Templates/Servicetable";
 import axios from "axios";
 import { useCurrentUser } from "@/app/hooks/use-current-user";
 import { FaUsers } from "react-icons/fa";
@@ -335,7 +335,7 @@ const Approver2 = ({ back }) => {
         pageSize: pageLimit,
       };
 
-      const apiUrl = `${process.env.NEXT_PUBLIC_URL}/excel/attendance`;
+      const apiUrl = `${process.env.NEXT_PUBLIC_URL}/Crm/attendance`;
 
       const response = await axios.post(apiUrl, payload, {
         headers: {
@@ -414,8 +414,8 @@ const Approver2 = ({ back }) => {
 
       const apiUrl =
         reportType === 1
-          ? `${process.env.NEXT_PUBLIC_URL}/excel/od`
-          : `${process.env.NEXT_PUBLIC_URL}/excel/attendance`;
+          ? `${process.env.NEXT_PUBLIC_URL}/Crm/OD_report_With_Pic`
+          : `${process.env.NEXT_PUBLIC_URL}/Crm/attendance`;
 
       console.log(`📤 Sending request for page ${pageNum}, limit ${pageLimit}`);
       console.log(`📍 API URL:`, apiUrl);
@@ -471,65 +471,65 @@ const Approver2 = ({ back }) => {
   const handlePageChange = (newPage) => {
     console.log(`🔄 Changing to page: ${newPage}`);
     showdata(newPage, pagination.pageSize);
-  };
+  };  
 
   const handlePageSizeChange = (newPageSize) => {
     console.log(`🔄 Changing page size to: ${newPageSize}`);
     showdata(1, newPageSize);
   };
 
-  const fetchApproverList = async (pageNum = 1, pageLimit = 10) => {
-    try {
-      setIsClicked(true);
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_URL}/approval/approverList`,
-        {
-          headers: {
-            compcode: user?.Comp_Code,
-            name: user?.name,
-            loc_code: user?.branch
-          },
-          params: {
-            page: pageNum,
-            pageSize: pageLimit,
-            compcode: user?.Comp_Code,
-          },
-        }
-      );
+  // const fetchApproverList = async (pageNum = 1, pageLimit = 10) => {
+  //   try {
+  //     setIsClicked(true);
+  //     const response = await axios.get(
+  //       `${process.env.NEXT_PUBLIC_URL}/approval/approverList`,
+  //       {
+  //         headers: {
+  //           compcode: user?.Comp_Code,
+  //           name: user?.name,
+  //           loc_code: user?.branch
+  //         },
+  //         params: {
+  //           page: pageNum,
+  //           pageSize: pageLimit,
+  //           compcode: user?.Comp_Code,
+  //         },
+  //       }
+  //     );
 
-      const approverList = response?.data?.data || [];
-      const totalRecords = response?.data?.pagination?.totalRecords || 0;
-      const totalPages = response?.data?.pagination?.totalPages || 0;
-      const currentPage = response?.data?.pagination?.currentPage || pageNum;
-      const pageSize = response?.data?.pagination?.pageSize || pageLimit;
+  //     const approverList = response?.data?.data || [];
+  //     const totalRecords = response?.data?.pagination?.totalRecords || 0;
+  //     const totalPages = response?.data?.pagination?.totalPages || 0;
+  //     const currentPage = response?.data?.pagination?.currentPage || pageNum;
+  //     const pageSize = response?.data?.pagination?.pageSize || pageLimit;
 
-      setApprData(approverList);
-      setApprPagination({
-        currentPage: currentPage,
-        pageSize: pageSize,
-        totalPages: totalPages,
-        totalRecords: totalRecords,
-      });
-    } catch (error) {
-      console.error("Error fetching approver list:", error);
-      toast({
-        title: "Failed to fetch approver list",
-        description: error.response?.data?.message || error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setIsClicked(false);
-    }
-  };
+  //     setApprData(approverList);
+  //     setApprPagination({
+  //       currentPage: currentPage,
+  //       pageSize: pageSize,
+  //       totalPages: totalPages,
+  //       totalRecords: totalRecords,
+  //     });
+  //   } catch (error) {
+  //     console.error("Error fetching approver list:", error);
+  //     toast({
+  //       title: "Failed to fetch approver list",
+  //       description: error.response?.data?.message || error.message,
+  //       variant: "destructive",
+  //     });
+  //   } finally {
+  //     setIsClicked(false);
+  //   }
+  // };
 
   const handleApproverPageChange = (newPage) => {
     console.log(`🔄 Changing approver list to page: ${newPage}`);
-    fetchApproverList(newPage, apprPagination.pageSize);
+    // fetchApproverList(newPage, apprPagination.pageSize);
   };
 
   const handleApproverPageSizeChange = (newPageSize) => {
     console.log(`🔄 Changing approver list page size to: ${newPageSize}`);
-    fetchApproverList(1, newPageSize);
+    // fetchApproverList(1, newPageSize);
   };
 
   const paidDaysCount = dailyAttendanceRows.filter((r) =>
@@ -557,7 +557,7 @@ const Approver2 = ({ back }) => {
                   variant="update" 
                   onClick={() => {
                     setIsModalVisible1(true);
-                    fetchApproverList(1, 10);
+                    // fetchApproverList(1, 10);
                   }}
                 >
                   <ListChecks size={18} />
