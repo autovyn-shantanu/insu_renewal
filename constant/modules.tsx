@@ -193,6 +193,12 @@ export const treeData = [
             url: "/autovyn/insurence-renewal/Mispunch_Approval_Grid",
           },
 
+           {
+            title: "HR MASTER |",
+            key: "23.3.13",
+            url: "/autovyn/insurence-renewal/hr-master",
+          },
+
 
         ],
       },
