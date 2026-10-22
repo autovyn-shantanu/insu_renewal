@@ -1,5 +1,6 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import SelectSearch from "@/components/atoms/Select";
 import { Button } from "@/components/ui/button";
 import ServiceTabel from "@/components/Templates/Servicetable";
@@ -39,6 +40,14 @@ const Approver2 = ({ back }) => {
     totalPages: 0,
     totalRecords: 0,
   });
+
+  const pageSizeRef = useRef(10);
+  const isChangingPageSizeRef = useRef(false);
+  const searchRef = useRef("");
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const debounceTimerRef = useRef<any>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchContainer, setSearchContainer] = useState<Element | null>(null);
 
   const Status = [
     { value: 1, label: "Pending" },
@@ -150,20 +159,35 @@ const Approver2 = ({ back }) => {
     { Header: "Month Count", accessor: "MonthCount" },
   ];
 
-  function getCurrentDate(monthsBack = 0) {
-    const today = new Date();
-    today.setMonth(today.getMonth() - monthsBack);
-    const year = today.getFullYear();
-    let month = today.getMonth() + 1;
-    let day = today.getDate();
-    if (month < 10) month = "0" + month;
-    if (day < 10) day = "0" + day;
-    return `${year}-${month}-${day}`;
-  }
+  const formatLocalYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
+  const getMonthDateRange = (dateObj = new Date()) => {
+    const y = dateObj.getFullYear();
+    const m = dateObj.getMonth();
+    const firstDay = new Date(y, m, 1);
+    const lastDay = new Date(y, m + 1, 0); // Correctly gets last day (31st for 31-day months)
+    const y1 = firstDay.getFullYear();
+    const m1 = String(firstDay.getMonth() + 1).padStart(2, "0");
+    const d1 = String(firstDay.getDate()).padStart(2, "0");
+    const y2 = lastDay.getFullYear();
+    const m2 = String(lastDay.getMonth() + 1).padStart(2, "0");
+    const d2 = String(lastDay.getDate()).padStart(2, "0");
+    return {
+      firstDay: `${y1}-${m1}-${d1}`,
+      lastDay: `${y2}-${m2}-${d2}`,
+    };
+  };
+
+  const defaultMonthRange = getMonthDateRange();
 
   const [dates, setDates] = useState({
-    DATE_FROM: globalDateRange?.from || getCurrentDate(),
-    DATE_TO: globalDateRange?.to || getCurrentDate(-1),
+    DATE_FROM: defaultMonthRange.firstDay,
+    DATE_TO: defaultMonthRange.lastDay,
     branch: user?.branch,
     status: 1,
   });
@@ -194,6 +218,25 @@ const Approver2 = ({ back }) => {
         setIsClicked(false);
       }
     }
+
+    if (name === "DATE_FROM" && value) {
+      const parts = value.split("-");
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const lastDayObj = new Date(y, m, 0);
+        const y2 = lastDayObj.getFullYear();
+        const m2 = String(lastDayObj.getMonth() + 1).padStart(2, "0");
+        const d2 = String(lastDayObj.getDate()).padStart(2, "0");
+        setDates((prevData) => ({
+          ...prevData,
+          DATE_FROM: value,
+          DATE_TO: `${y2}-${m2}-${d2}`,
+        }));
+        return;
+      }
+    }
+
     setDates((prevData) => ({
       ...prevData,
       [name]: value,
@@ -206,6 +249,8 @@ const Approver2 = ({ back }) => {
     setReportType(numValue);
     setTabledata([]);
     setFiltereddata([]);
+    searchRef.current = "";
+    setSearchTerm("");
     setIsDialogOpen(false);
     setDailyAttendanceRows([]);
     setDailyLoading(false);
@@ -217,6 +262,33 @@ const Approver2 = ({ back }) => {
       totalPages: 0,
       totalRecords: 0,
     });
+  };
+
+  const lastClickRef = useRef<{ time: number; id: any }>({ time: 0, id: null });
+  const lastOpenedRef = useRef<number>(0);
+
+  const triggerOpenDialog = (rowData: any) => {
+    if (!rowData || Object.keys(rowData).length === 0) return;
+    const now = Date.now();
+    // Prevent duplicate rapid triggers within 400ms
+    if (now - lastOpenedRef.current < 400) return;
+    lastOpenedRef.current = now;
+    doubleclicked(rowData);
+  };
+
+  const handleRowClick = (rowId: any, rowData: any) => {
+    if (!rowData || Object.keys(rowData).length === 0) return;
+
+    const now = Date.now();
+    const isSameRow = String(lastClickRef.current.id) === String(rowId);
+    const isDoubleTap = isSameRow && (now - lastClickRef.current.time < 500);
+
+    lastClickRef.current = { time: now, id: rowId };
+
+    if (isDoubleTap) {
+      lastClickRef.current = { time: 0, id: null };
+      triggerOpenDialog(rowData);
+    }
   };
 
   const doubleclicked = (rowData) => {
@@ -233,7 +305,7 @@ const Approver2 = ({ back }) => {
       return;
     }
 
-    const currentReportType = parseInt(reportType);
+    const currentReportType = Number(reportType);
 
     if (currentReportType === 1) {
       console.log("✅ Opening Approval Report Dialog");
@@ -273,9 +345,11 @@ const Approver2 = ({ back }) => {
     try {
       const res = await axios.get(
         `${process.env.NEXT_PUBLIC_URL}/ars/getDateRange`,
-        { headers: {
-           compcode: user?.Comp_Code
-           } }
+        {
+          headers: {
+            compcode: user?.Comp_Code
+          }
+        }
       );
 
       const { DATE_FROM, DATE_TO } = res.data?.result || {};
@@ -287,24 +361,20 @@ const Approver2 = ({ back }) => {
           DATE_TO,
         }));
       } else {
-        const now = new Date();
-        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const range = getMonthDateRange();
         setDates((prev) => ({
           ...prev,
-          DATE_FROM: firstDay.toISOString().split("T")[0],
-          DATE_TO: lastDay.toISOString().split("T")[0],
+          DATE_FROM: range.firstDay,
+          DATE_TO: range.lastDay,
         }));
       }
     } catch (error) {
       console.error("Date range API failed", error);
-      const now = new Date();
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const range = getMonthDateRange();
       setDates((prev) => ({
         ...prev,
-        DATE_FROM: firstDay.toISOString().split("T")[0],
-        DATE_TO: lastDay.toISOString().split("T")[0],
+        DATE_FROM: range.firstDay,
+        DATE_TO: range.lastDay,
       }));
     }
   };
@@ -333,15 +403,15 @@ const Approver2 = ({ back }) => {
         LeftEmp: 1,
         page: pageNum,
         pageSize: pageLimit,
+        loc_code: user?.branch,
       };
 
-      const apiUrl = `${process.env.NEXT_PUBLIC_URL}/Crm/attendance`;
+      const apiUrl = `${process.env.NEXT_PUBLIC_URL}/hrmsreport/attendance`;
 
       const response = await axios.post(apiUrl, payload, {
         headers: {
           compcode: user?.Comp_Code,
           name: user?.name,
-          loc_code:user?.branch
         },
         params: { compcode: user?.Comp_Code },
       });
@@ -364,7 +434,7 @@ const Approver2 = ({ back }) => {
       );
 
       setDailyAttendanceRows(dataWithSrNo);
-      
+
       // ✅ Update daily pagination state
       setDailyPagination({
         currentPage: currentPage,
@@ -390,8 +460,20 @@ const Approver2 = ({ back }) => {
     fetchEmployeeDailyAttendance(attendanceDetailData?.Empcode, 1, newPageSize);
   };
 
-  const showdata = async (pageNum = 1, pageLimit = 10) => {
-    setIsClicked(true);
+  const showdata = async (
+    pageNum = 1,
+    pageLimit = 10,
+    searchParam?: string,
+    showLoader = true
+  ) => {
+    if (showLoader) {
+      setIsClicked(true);
+    }
+
+    const activeSearch = searchParam !== undefined ? searchParam : searchRef.current;
+    if (searchParam !== undefined) {
+      searchRef.current = searchParam;
+    }
 
     try {
       const payload = {
@@ -410,21 +492,23 @@ const Approver2 = ({ back }) => {
         LeftEmp: 1,
         page: pageNum,
         pageSize: pageLimit,
+        limit: pageLimit,
+        loc_code: user?.branch,
+        search: activeSearch || "",
       };
 
       const apiUrl =
         reportType === 1
-          ? `${process.env.NEXT_PUBLIC_URL}/Crm/OD_report_With_Pic`
-          : `${process.env.NEXT_PUBLIC_URL}/Crm/attendance`;
+          ? `${process.env.NEXT_PUBLIC_URL}/hrmsreport/OD_report_With_Pic`
+          : `${process.env.NEXT_PUBLIC_URL}/hrmsreport/attendance`;
 
-      console.log(`📤 Sending request for page ${pageNum}, limit ${pageLimit}`);
+      console.log(`📤 Sending request for page ${pageNum}, limit ${pageLimit}, search "${activeSearch || ""}"`);
       console.log(`📍 API URL:`, apiUrl);
 
       const response = await axios.post(apiUrl, payload, {
         headers: {
           compcode: user?.Comp_Code,
           name: user?.name,
-          loc_code:user?.branch
         },
         params: {
           compcode: user?.Comp_Code,
@@ -437,10 +521,29 @@ const Approver2 = ({ back }) => {
       const currentPage = response?.data?.pagination?.currentPage || pageNum;
       const pageSize = response?.data?.pagination?.pageSize || pageLimit;
 
-      const dataWithSrNo = resultData.map((item, index) => ({
-        ...item,
-        srno: (currentPage - 1) * pageSize + index + 1,
-      }));
+      pageSizeRef.current = pageSize;
+
+      const dataWithSrNo = resultData.map((item, index) => {
+        const history = item.attendance_history || item.attendance || item.records || [];
+        const paid = history.filter((h) =>
+          ["P", "P2F", "PL", "CL", "SL", "H", "WO"].includes(
+            String(h.Status).trim().toUpperCase()
+          )
+        ).length;
+        const penalty = history.filter((h) =>
+          ["A", "LWP"].includes(String(h.Status).trim().toUpperCase())
+        ).length;
+        const count = history.length;
+
+        return {
+          ...item,
+          srno: (currentPage - 1) * pageSize + index + 1,
+          "Paid Days": item["Paid Days"] !== undefined ? item["Paid Days"] : paid,
+          "Total Penalty Days": item["Total Penalty Days"] !== undefined ? item["Total Penalty Days"] : penalty,
+          MonthCount: item.MonthCount !== undefined ? item.MonthCount : (item["Month Count"] !== undefined ? item["Month Count"] : count),
+          "Month Count": item["Month Count"] !== undefined ? item["Month Count"] : (item.MonthCount !== undefined ? item.MonthCount : count),
+        };
+      });
 
       setTabledata(dataWithSrNo);
       setFiltereddata(dataWithSrNo);
@@ -469,14 +572,69 @@ const Approver2 = ({ back }) => {
   };
 
   const handlePageChange = (newPage) => {
+    if (isChangingPageSizeRef.current) {
+      console.log(`⏸️ Skipping duplicate page change triggered by page size update`);
+      return;
+    }
     console.log(`🔄 Changing to page: ${newPage}`);
-    showdata(newPage, pagination.pageSize);
-  };  
+    showdata(newPage, pageSizeRef.current, searchRef.current);
+  };
 
   const handlePageSizeChange = (newPageSize) => {
     console.log(`🔄 Changing page size to: ${newPageSize}`);
-    showdata(1, newPageSize);
+    isChangingPageSizeRef.current = true;
+    pageSizeRef.current = newPageSize;
+    showdata(1, newPageSize, searchRef.current).finally(() => {
+      setTimeout(() => {
+        isChangingPageSizeRef.current = false;
+      }, 300);
+    });
   };
+
+  // ✅ Find the toolbar container inside ServiceTabel to place our custom search input
+  useEffect(() => {
+    if (tableContainerRef.current) {
+      const origInput = tableContainerRef.current.querySelector(
+        'input[placeholder="Search..."]:not([data-custom-search])'
+      );
+      if (origInput && origInput.parentElement) {
+        setSearchContainer(origInput.parentElement);
+      }
+    }
+  }, [searchContainer]);
+
+  const handleCustomSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchTerm(val);
+    searchRef.current = val;
+
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      console.log("🔍 Global search triggered:", val);
+      showdata(1, pageSizeRef.current || pagination.pageSize, val, true);
+    }, 350);
+  };
+
+  // useEffect(() => {
+  //   const container = tableContainerRef.current;
+  //   if (!container) return;
+
+  //   const handleClick = (e: Event) => {
+  //     const target = e.target as HTMLElement;
+  //     if (
+  //       target &&
+  //       (target.innerText === "Reset Filters" ||
+  //         target.closest("button")?.innerText?.includes("Reset Filters"))
+  //     ) {
+  //       setSearchTerm("");
+  //       searchRef.current = "";
+  //       showdata(1, pageSizeRef.current || pagination.pageSize, "", true);
+  //     }
+  //   };
+
+  //   container.addEventListener("click", handleClick);
+  //   return () => container.removeEventListener("click", handleClick);
+  // }, []);
 
   // const fetchApproverList = async (pageNum = 1, pageLimit = 10) => {
   //   try {
@@ -546,24 +704,24 @@ const Approver2 = ({ back }) => {
     <div>
       <div>
         {/* ===== HEADER ===== */}
-        <div className="col-span-12 rounded-t bg-header dark:bg-black px-2 md:px-6 py-2 border dark:border-borderColor-dark">
-          <div className="flex justify-between">
-            <h1 className="font-bold sm:text-sm md:text-lg lg:text-xl text-white dark:text-[#37a9dd] flex items-center gap-x-3 uppercase">
+        <div className="rounded-t bg-header dark:bg-black px-3 md:px-6 py-2.5 border dark:border-borderColor-dark">
+          <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-2">
+            <h1 className="font-bold text-sm sm:text-base md:text-lg lg:text-xl text-white dark:text-[#37a9dd] flex items-center gap-x-2 md:gap-x-3 uppercase">
               {reportType === 1 ? "MIS-PUNCH APPROVER REPORT" : "ATTENDANCE REPORT"}
             </h1>
-            <div className="flex gap-2 mr-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               {reportType === 1 && (
-                <Button 
-                  variant="update" 
+                <Button
+                  variant="update"
                   onClick={() => {
                     setIsModalVisible1(true);
-                    // fetchApproverList(1, 10);
                   }}
+                  className="px-3"
                 >
                   <ListChecks size={18} />
                 </Button>
               )}
-              <Button variant="print" onClick={() => window.history.back()}>
+              <Button variant="print" onClick={() => window.history.back()} className="px-3">
                 Back
               </Button>
             </div>
@@ -572,10 +730,10 @@ const Approver2 = ({ back }) => {
 
         {/* ===== FILTERS ===== */}
         <div
-          className="grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-3 mt-2 rounded-b p-2 md:p-4 bg-white dark:bg-black border border-borderColor dark:border-borderColor-dark shadow"
+          className="relative z-30 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 md:gap-3 mt-2 rounded-b p-2 md:p-4 bg-white dark:bg-black border border-borderColor dark:border-borderColor-dark shadow [&_.react-datepicker-popper]:!z-[9999] [&_.react-datepicker]:!shadow-2xl"
           id="pdfContent"
         >
-          <div className="md:col-span-2">
+          <div className="col-span-1 sm:col-span-1 lg:col-span-2 relative z-10 focus-within:z-[9999]">
             <SelectSearch
               title="Report Type"
               options={ReportType}
@@ -585,28 +743,30 @@ const Approver2 = ({ back }) => {
             />
           </div>
 
-          <div className="md:col-span-2">
+          <div className="col-span-1 sm:col-span-1 lg:col-span-2 relative z-10 has-[.react-datepicker-popper]:z-[9999] focus-within:z-[9999]">
             <Ainput
               title="DATE FROM"
               type="date"
               name="DATE_FROM"
               value={dates.DATE_FROM}
               handleInputChange={handleDateChange}
+              popperClassName="!z-[9999]"
             />
           </div>
 
-          <div className="md:col-span-2">
+          <div className="col-span-1 sm:col-span-1 lg:col-span-2 relative z-10 has-[.react-datepicker-popper]:z-[9999] focus-within:z-[9999]">
             <Ainput
               title="DATE TO"
               type="date"
               name="DATE_TO"
               value={dates.DATE_TO}
               handleInputChange={handleDateChange}
+              popperClassName="!z-[9999]"
             />
           </div>
 
           {reportType === 1 && (
-            <div className="md:col-span-2">
+            <div className="col-span-1 sm:col-span-1 lg:col-span-2 relative z-10 focus-within:z-[9999]">
               <SelectSearch
                 title="Status"
                 options={Status}
@@ -617,25 +777,32 @@ const Approver2 = ({ back }) => {
             </div>
           )}
 
-          <div className="md:col-span-2 mt-6">
-            <Button onClick={() => showdata(1, pagination.pageSize)} variant={"save"}>
+          <div className="col-span-1 sm:col-span-1 lg:col-span-2 flex items-end sm:mt-0 mt-2 relative z-0">
+            <Button
+              onClick={() => showdata(1, pageSizeRef.current || pagination.pageSize)}
+              variant={"save"}
+              className="w-full sm:w-auto"
+            >
               Show
             </Button>
           </div>
         </div>
 
         {/* ===== DATA TABLE (USING SERVICETABEL) ===== */}
-        <div className="md:col-span-3"></div>
-        <div className="md:col-span-12 gap-2 md:gap-3 mt-2 rounded-b p-2 md:p-4 bg-white dark:bg-black border border-borderColor dark:border-borderColor-dark shadow">
+        <div
+          ref={tableContainerRef}
+          className="w-full mt-2 rounded-b p-2 md:p-4 bg-white dark:bg-black border border-borderColor dark:border-borderColor-dark shadow overflow-x-auto [&_input[placeholder='Search...']:not([data-custom-search])]:hidden"
+        >
           <ServiceTabel
             columns={reportType === 1 ? approvalColumns : attendanceColumns}
             data={filtereddata}
             selectValue="srno"
             height="370px"
-            onRowDoubleClick={doubleclicked}
+            onRowClick={handleRowClick}
+            onRowDoubleClick={triggerOpenDialog}
             ischeckbox={false}
             enableColumnFilters={true}
-            filterPosition="header"
+            filterPosition="FilterData"
             columnsDownload={reportType === 1 ? approvalColumns : attendanceColumns}
             serverMode={true}
             serverPagination={{
@@ -649,312 +816,318 @@ const Approver2 = ({ back }) => {
             onServerPageChange={handlePageChange}
             onServerPageSizeChange={handlePageSizeChange}
           />
+          {searchContainer &&
+            createPortal(
+              <input
+                data-custom-search="true"
+                className="border border-borderColor dark:border-borderColor-dark h-[32px] px-2.5 w-full sm:w-52 text-black dark:text-white py-1 dark:bg-input rounded text-xs sm:text-sm shadow focus:outline-none focus:ring ease-linear transition-all duration-150"
+                type="text"
+                value={searchTerm}
+                onChange={handleCustomSearchChange}
+                placeholder="Search..."
+              />,
+              searchContainer
+            )}
         </div>
-
-        <HashloaderComponent isLoading={isClicked} />
       </div>
 
       {/* ================= DIALOG - MIS PUNCH DETAIL ON DOUBLE CLICK (APPROVAL REPORT ONLY) ================= */}
-      {reportType === 1 && isDialogOpen && Object.keys(MissPunchData).length > 0 && (
+      {Number(reportType) === 1 && isDialogOpen && Object.keys(MissPunchData).length > 0 && (
         <div className="col-span-12 mt-2 items-center">
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogContent className="w-full max-w-screen-xl lg:h-[620px] md:h-[620px] p-5">
-              <DialogHeader>
-                <DialogTitle>Mis-Punch Request Details</DialogTitle>
-                <hr className="bg-body-color" />
+            <DialogContent className="w-[96vw] max-w-5xl h-[90vh] max-h-[750px] p-3 sm:p-5 overflow-hidden flex flex-col z-[9999]">
+              <DialogHeader className="flex-shrink-0">
+                <DialogTitle className="text-base sm:text-lg">Mis-Punch Request Details</DialogTitle>
+                <hr className="bg-body-color mt-2" />
               </DialogHeader>
-              <DialogDescription>
-                <div
-                  className="grid grid-cols-12 gap-2"
-                  style={{ maxHeight: "560px", overflowY: "scroll" }}
-                >
-                  <div className="col-span-12 font-bold text-blue-700">
+              <div className="flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2">
+                <div className="grid grid-cols-12 gap-2 text-xs sm:text-sm">
+                  <div className="col-span-12 font-bold text-blue-700 text-sm sm:text-base">
                     Employee Information
                   </div>
 
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Employee Code
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Employee Code"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Employee Name
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Employee Name"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Date Of Joining
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDate(MissPunchData["Date Of Joining"])}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Mobile No.
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Mobile No."]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Company
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Company"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Designation
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Designation"]}
                     </span>
                   </div>
 
                   <hr className="col-span-12 my-2" />
 
-                  <div className="col-span-12 font-bold text-blue-700">
+                  <div className="col-span-12 font-bold text-blue-700 text-sm sm:text-base">
                     Organizational Details
                   </div>
 
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Channel
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Channel"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Cluster
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Cluster"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Branch
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Branch"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Section
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Section"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Department
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Department"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Region
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Region"]}
                     </span>
                   </div>
 
                   <hr className="col-span-12 my-2" />
 
-                  <div className="col-span-12 font-bold text-blue-700">
+                  <div className="col-span-12 font-bold text-blue-700 text-sm sm:text-base">
                     Mis-Punch Details
                   </div>
 
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Start From
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDateTime(MissPunchData["Start From"])}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       End From
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDateTime(MissPunchData["End From"])}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       OD Type
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["OD Type"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Shift Start Time
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Shift Start Time"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Shift End Time
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Shift End Time"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Attn. Status
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["ATTN. STATUS"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Mispunch IN Applied On
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDateTime(MissPunchData["Mispunch IN Applied On"])}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Mispunch OUT Applied On
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDateTime(
                         MissPunchData["Mispunch OUT Applied On"]
                       )}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Mispunch Entered By
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Mispunch Enter By"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Applied Type
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Applied Type"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Total Days
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Total_OD_Days"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Mis-Punch Status
                     </span>
-                    <span className="w-1/12 text-center">:</span>
+                    <span className="w-4 text-center flex-shrink-0">:</span>
                     <span
-                      className={`w-2/3 text-left font-semibold ${
-                        MissPunchData["OD Status"] === "Final Acceptance"
-                          ? "text-green-600"
-                          : MissPunchData["OD Status"] === "Rejected"
+                      className={`flex-1 text-left font-semibold break-words ${MissPunchData["OD Status"] === "Final Acceptance"
+                        ? "text-green-600"
+                        : MissPunchData["OD Status"] === "Rejected"
                           ? "text-red-600"
                           : "text-yellow-600"
-                      }`}
+                        }`}
                     >
                       {MissPunchData["OD Status"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Employee Remark
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Employee  Remark"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Employee SPL Remark
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Employee SPL Remark"]}
                     </span>
                   </div>
 
                   <div className="col-span-12 mt-2">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="flex flex-col">
-                        <span className="font-semibold mb-1">Mispunch In Image</span>
+                        <span className="font-semibold mb-1 text-xs sm:text-sm">Mispunch In Image</span>
                         {MissPunchData.fileIn ? (
                           <img
                             src={MissPunchData.fileIn}
                             alt="Mispunch In"
-                            className="w-full max-h-[200px] object-contain border rounded"
+                            className="w-full max-h-[180px] sm:max-h-[220px] object-contain border rounded bg-gray-50"
                           />
                         ) : (
-                          <span className="text-gray-500 text-sm italic">No Image Available</span>
+                          <span className="text-gray-500 text-xs sm:text-sm italic">No Image Available</span>
                         )}
                       </div>
                       <div className="flex flex-col">
-                        <span className="font-semibold mb-1">Mispunch Out Image</span>
+                        <span className="font-semibold mb-1 text-xs sm:text-sm">Mispunch Out Image</span>
                         {MissPunchData.fileOut ? (
                           <img
                             src={MissPunchData.fileOut}
                             alt="Mispunch Out"
-                            className="w-full max-h-[200px] object-contain border rounded"
+                            className="w-full max-h-[180px] sm:max-h-[220px] object-contain border rounded bg-gray-50"
                           />
                         ) : (
-                          <span className="text-gray-500 text-sm italic">No Image Available</span>
+                          <span className="text-gray-500 text-xs sm:text-sm italic">No Image Available</span>
                         )}
                       </div>
                     </div>
@@ -962,608 +1135,560 @@ const Approver2 = ({ back }) => {
 
                   <hr className="col-span-12 my-2" />
 
-                  <div className="col-span-12 font-bold text-blue-700">
+                  <div className="col-span-12 font-bold text-blue-700 text-sm sm:text-base">
                     Approver 1 Details
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Emp Code
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 1 Emp code"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">Name</span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">Name</span>
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 1 Name"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Action Status
                     </span>
-                    <span className="w-1/12 text-center">:</span>
+                    <span className="w-4 text-center flex-shrink-0">:</span>
                     <span
-                      className={`w-2/3 text-left font-semibold ${
-                        MissPunchData["Approver 1 Action Status"] ===
+                      className={`flex-1 text-left font-semibold break-words ${MissPunchData["Approver 1 Action Status"] ===
                         "Final Acceptance"
-                          ? "text-green-600"
-                          : MissPunchData["Approver 1 Action Status"] ===
-                            "Rejected"
+                        ? "text-green-600"
+                        : MissPunchData["Approver 1 Action Status"] ===
+                          "Rejected"
                           ? "text-red-600"
                           : "text-yellow-600"
-                      }`}
+                        }`}
                     >
                       {MissPunchData["Approver 1 Action Status"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Remarks
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 1 Remarks"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Action Taken On
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDate(MissPunchData["Approver 1 Action Taken on"])}
                     </span>
                   </div>
 
                   <hr className="col-span-12 my-2" />
 
-                  <div className="col-span-12 font-bold text-blue-700">
+                  <div className="col-span-12 font-bold text-blue-700 text-sm sm:text-base">
                     Approver 2 Details
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Emp Code
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 2 Emp code"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">Name</span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">Name</span>
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 2 Name"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Action Status
                     </span>
-                    <span className="w-1/12 text-center">:</span>
+                    <span className="w-4 text-center flex-shrink-0">:</span>
                     <span
-                      className={`w-2/3 text-left font-semibold ${
-                        MissPunchData["Approver 2 Action Status"] ===
+                      className={`flex-1 text-left font-semibold break-words ${MissPunchData["Approver 2 Action Status"] ===
                         "Final Acceptance"
-                          ? "text-green-600"
-                          : MissPunchData["Approver 2 Action Status"] ===
-                            "Rejected"
+                        ? "text-green-600"
+                        : MissPunchData["Approver 2 Action Status"] ===
+                          "Rejected"
                           ? "text-red-600"
                           : "text-yellow-600"
-                      }`}
+                        }`}
                     >
                       {MissPunchData["Approver 2 Action Status"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Remarks
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 2 Remarks"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Action Taken On
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDate(MissPunchData["Approver 2 Action Taken on"])}
                     </span>
                   </div>
 
                   <hr className="col-span-12 my-2" />
 
-                  <div className="col-span-12 font-bold text-blue-700">
+                  <div className="col-span-12 font-bold text-blue-700 text-sm sm:text-base">
                     Approver 3 Details
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Emp Code
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 3 Emp code"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">Name</span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">Name</span>
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 3 Name"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Action Status
                     </span>
-                    <span className="w-1/12 text-center">:</span>
+                    <span className="w-4 text-center flex-shrink-0">:</span>
                     <span
-                      className={`w-2/3 text-left font-semibold ${
-                        MissPunchData["Approver 3 Action Status"] ===
+                      className={`flex-1 text-left font-semibold break-words ${MissPunchData["Approver 3 Action Status"] ===
                         "Final Acceptance"
-                          ? "text-green-600"
-                          : MissPunchData["Approver 3 Action Status"] ===
-                            "Rejected"
+                        ? "text-green-600"
+                        : MissPunchData["Approver 3 Action Status"] ===
+                          "Rejected"
                           ? "text-red-600"
                           : "text-yellow-600"
-                      }`}
+                        }`}
                     >
                       {MissPunchData["Approver 3 Action Status"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Remarks
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {MissPunchData["Approver 3 Remarks"]}
                     </span>
                   </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
+                  <div className="col-span-12 md:col-span-6 flex items-start">
+                    <span className="w-5/12 sm:w-4/12 text-left font-semibold flex-shrink-0">
                       Action Taken On
                     </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left">
+                    <span className="w-4 text-center flex-shrink-0">:</span>
+                    <span className="flex-1 text-left break-words">
                       {formatDate(MissPunchData["Approver 3 Action Taken on"])}
                     </span>
                   </div>
                 </div>
-              </DialogDescription>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
       )}
 
       {/* ================= DIALOG - ATTENDANCE DETAIL ON DOUBLE CLICK (ATTENDANCE REPORT ONLY) ================= */}
-      {reportType === 2 && isDialogOpen && Object.keys(attendanceDetailData).length > 0 && (
+      {Number(reportType) === 2 && isDialogOpen && Object.keys(attendanceDetailData).length > 0 && (
         <div className="col-span-12 mt-2 items-center">
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogContent className="w-full max-w-screen-xl lg:h-[90vh] md:h-[90vh] p-5 overflow-hidden flex flex-col">
+            <DialogContent className="w-[96vw] max-w-7xl 2xl:max-w-screen-2xl h-[92vh] max-h-[92vh] p-3 sm:p-5 overflow-hidden flex flex-col z-[9999]">
               <DialogHeader className="flex-shrink-0">
-                <DialogTitle>Attendance Details</DialogTitle>
-                <hr className="bg-body-color" />
+                <DialogTitle className="text-base sm:text-lg">Attendance Details</DialogTitle>
+                <hr className="bg-body-color mt-2" />
               </DialogHeader>
 
-              <div className="flex-1 overflow-y-auto pr-4 flex flex-col">
-                <div className="grid grid-cols-12 gap-3 flex-shrink-0">
-                  <div className="col-span-12 font-bold text-blue-700 text-lg">
-                    Employee Information
+              {/* Two Column Layout: Left (Employee Information) | Right (Daily Attendance Records) */}
+              <div className="flex-1 min-h-0 overflow-hidden flex flex-col md:flex-row gap-4 lg:gap-5 pt-2 sm:pt-3">
+                {/* Left Column: Employee Information, Organizational Details & Attendance Summary */}
+                <div className="w-full md:w-[360px] lg:w-[400px] max-h-[36vh] md:max-h-none flex-shrink-0 overflow-y-auto pr-2 sm:pr-3 pb-3 md:pb-0 md:border-r border-b md:border-b-0 border-gray-200 flex flex-col gap-3">
+                  <div>
+                    <div className="font-bold text-blue-700 text-base sm:text-lg mb-2">
+                      Employee Information
+                    </div>
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Employee Code
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Empcode?.trim()}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Employee Name
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.EmployeeName?.trim()}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Joining Date
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {formatDate(attendanceDetailData?.JoiningDate)}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Designation
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Designation}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Employee Code
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Empcode?.trim()}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Employee Name
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.EmployeeName?.trim()}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Joining Date
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {formatDate(attendanceDetailData?.JoiningDate)}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Designation
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Designation}
-                    </span>
+                  <hr className="my-1" />
+
+                  <div>
+                    <div className="font-bold text-blue-700 text-base sm:text-lg mb-2">
+                      Organizational Details
+                    </div>
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Region
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Region}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Channel
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Channel}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Cluster
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Cluster}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Location
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Location}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Section
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Section}
+                        </span>
+                      </div>
+                      <div className="flex items-start text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Department
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium break-words">
+                          {attendanceDetailData?.Department || "N/A"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
-                  <hr className="col-span-12 my-2" />
+                  <hr className="my-1" />
 
-                  <div className="col-span-12 font-bold text-blue-700 text-lg">
-                    Organizational Details
-                  </div>
-
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Region
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Region}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Channel
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Channel}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Cluster
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Cluster}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Location
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Location}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Section
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Section}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Department
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {attendanceDetailData?.Department || "N/A"}
-                    </span>
-                  </div>
-
-                  <hr className="col-span-12 my-2" />
-
-                  <div className="col-span-12 font-bold text-blue-700 text-lg">
-                    Attendance Summary
-                  </div>
-
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Paid Days
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left text-green-600 font-bold text-lg">
-                      {dailyLoading ? "..." : paidDaysCount}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Total Penalty Days
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left text-red-600 font-bold text-lg">
-                      {dailyLoading ? "..." : penaltyDaysCount}
-                    </span>
-                  </div>
-                  <div className="col-span-12 xl:col-span-6 md:col-span-6 flex">
-                    <span className="w-1/3 text-left font-semibold">
-                      Total Days in Period
-                    </span>
-                    <span className="w-1/12 text-center">:</span>
-                    <span className="w-2/3 text-left font-medium">
-                      {dailyLoading ? "..." : totalDaysCount}
-                    </span>
-                  </div>
-
-                  <hr className="col-span-12 my-3" />
-
-                  <div className="col-span-12 font-bold text-blue-700 text-lg mb-3">
-                    📅 Daily Attendance Records (Page {dailyPagination.currentPage} of {dailyPagination.totalPages})
+                  <div>
+                    <div className="font-bold text-blue-700 text-base sm:text-lg mb-2">
+                      Attendance Summary
+                    </div>
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <div className="flex items-center text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Paid Days
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left text-green-600 font-bold text-base sm:text-lg">
+                          {attendanceDetailData?.["Paid Days"] !== undefined
+                            ? attendanceDetailData["Paid Days"]
+                            : (dailyLoading ? "..." : paidDaysCount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Total Penalty Days
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left text-red-600 font-bold text-base sm:text-lg">
+                          {attendanceDetailData?.["Total Penalty Days"] !== undefined
+                            ? attendanceDetailData["Total Penalty Days"]
+                            : (dailyLoading ? "..." : penaltyDaysCount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center text-xs sm:text-sm">
+                        <span className="w-5/12 text-left font-semibold flex-shrink-0">
+                          Total Days in Period
+                        </span>
+                        <span className="w-4 text-center flex-shrink-0">:</span>
+                        <span className="flex-1 text-left font-medium">
+                          {attendanceDetailData?.["MonthCount"] !== undefined
+                            ? attendanceDetailData["MonthCount"]
+                            : (attendanceDetailData?.["Month Count"] !== undefined
+                              ? attendanceDetailData["Month Count"]
+                              : (dailyLoading ? "..." : totalDaysCount))}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                {dailyLoading ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-gray-500 py-8 bg-gray-50 rounded-lg">
-                      Loading daily attendance records...
-                    </div>
+                {/* Right Column: Daily Attendance Records */}
+                <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden pl-0 md:pl-2">
+                  <div className="font-bold text-blue-700 text-base sm:text-lg mb-2 sm:mb-3 flex-shrink-0">
+                    📅 Daily Attendance Records (Page {dailyPagination.currentPage} of {dailyPagination.totalPages})
                   </div>
-                ) : dailyAttendanceRows.length > 0 ? (
-                  <div className="flex-1 overflow-y-auto">
-                    <div className="space-y-4 pr-4">
-                      {dailyAttendanceRows.map((item, index) => {
-                        const statusValue = item.Status?.trim() || "N/A";
-                        const inTime = item.InTime;
-                        const outTime = item.OutTime;
 
-                        const inImage =
-                          item.InPhotoUrl ||
-                          (item.InPhoto
-                            ? `https://erp.autovyn.com/backend/fetch?filePath=${item.InPhoto}`
-                            : "");
-                        const outImage =
-                          item.OutPhotoUrl ||
-                          (item.OutPhoto
-                            ? `https://erp.autovyn.com/backend/fetch?filePath=${item.OutPhoto}`
-                            : "");
-
-                        let statusColor = "bg-gray-50 border-l-4 border-gray-400";
-                        let statusBgColor = "bg-gray-200 text-gray-800";
-
-                        if (statusValue === "P" || statusValue.startsWith("P")) {
-                          statusColor = "bg-green-50 border-l-4 border-green-500";
-                          statusBgColor = "bg-green-200 text-green-800";
-                        } else if (statusValue === "A") {
-                          statusColor = "bg-red-50 border-l-4 border-red-500";
-                          statusBgColor = "bg-red-200 text-red-800";
-                        } else if (statusValue === "H") {
-                          statusColor = "bg-blue-50 border-l-4 border-blue-500";
-                          statusBgColor = "bg-blue-200 text-blue-800";
-                        } else if (statusValue === "WO") {
-                          statusColor = "bg-yellow-50 border-l-4 border-yellow-500";
-                          statusBgColor = "bg-yellow-200 text-yellow-800";
-                        } else if (statusValue === "LWP") {
-                          statusColor = "bg-purple-50 border-l-4 border-purple-500";
-                          statusBgColor = "bg-purple-200 text-purple-800";
-                        }
-
-                        return (
-                          <div
-                            key={index}
-                            className={`${statusColor} rounded-lg p-4 shadow-sm hover:shadow-md transition`}
-                          >
-                            <div className="grid grid-cols-12 gap-3">
-                              <div className="col-span-12 font-bold text-lg text-gray-800 mb-2">
-                                📆 {item.AttendanceDate}
-                              </div>
-
-                              <div className="col-span-12 xl:col-span-4 md:col-span-4 flex flex-col">
-                                <span className="text-sm font-semibold text-gray-600 mb-1">
-                                  Status
-                                </span>
-                                <span
-                                  className={`font-bold text-lg px-3 py-1 rounded w-fit ${statusBgColor}`}
-                                >
-                                  {statusValue}
-                                </span>
-                              </div>
-
-                              <div className="col-span-12 xl:col-span-4 md:col-span-4 flex flex-col">
-                                <span className="text-sm font-semibold text-gray-600 mb-1">
-                                  In Time
-                                </span>
-                                <span className="font-medium text-gray-800">
-                                  {inTime && inTime !== "00:00:00"
-                                    ? inTime
-                                    : "—"}
-                                </span>
-                              </div>
-
-                              <div className="col-span-12 xl:col-span-4 md:col-span-4 flex flex-col">
-                                <span className="text-sm font-semibold text-gray-600 mb-1">
-                                  Out Time
-                                </span>
-                                <span className="font-medium text-gray-800">
-                                  {outTime && outTime !== "00:00:00"
-                                    ? outTime
-                                    : "—"}
-                                </span>
-                              </div>
-
-                              {(inImage || outImage) && (
-                                <>
-                                  <div className="col-span-12">
-                                    <hr className="border-gray-300 my-2" />
-                                  </div>
-                                  <div className="col-span-12">
-                                    <div className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                                      📸 Punch Images
-                                    </div>
-                                  </div>
-
-                                  {inImage ? (
-                                    <div className="col-span-12 xl:col-span-6 md:col-span-6 flex flex-col">
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <span className="text-xs font-bold bg-green-100 text-green-800 px-2 py-1 rounded">
-                                          ✓ IN
-                                        </span>
-                                        <span className="text-sm font-semibold text-gray-700">
-                                          In Punch Image
-                                        </span>
-                                      </div>
-                                      <img
-                                        src={inImage}
-                                        alt={`In Punch ${item.AttendanceDate}`}
-                                        className="w-full h-56 object-cover border-2 border-green-300 rounded-lg hover:border-green-500 transition cursor-pointer shadow-md"
-                                        onError={(e) => {
-                                          e.target.src =
-                                            "https://via.placeholder.com/300x250?text=Image+Not+Found";
-                                        }}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="col-span-12 xl:col-span-6 md:col-span-6 flex flex-col">
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <span className="text-xs font-bold bg-gray-100 text-gray-800 px-2 py-1 rounded">
-                                          ⊗ IN
-                                        </span>
-                                        <span className="text-sm font-semibold text-gray-700">
-                                          In Punch Image
-                                        </span>
-                                      </div>
-                                      <div className="w-full h-56 bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
-                                        <span className="text-gray-500 text-center">
-                                          No In Punch Image
-                                        </span>
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {outImage ? (
-                                    <div className="col-span-12 xl:col-span-6 md:col-span-6 flex flex-col">
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <span className="text-xs font-bold bg-red-100 text-red-800 px-2 py-1 rounded">
-                                          ✓ OUT
-                                        </span>
-                                        <span className="text-sm font-semibold text-gray-700">
-                                          Out Punch Image
-                                        </span>
-                                      </div>
-                                      <img
-                                        src={outImage}
-                                        alt={`Out Punch ${item.AttendanceDate}`}
-                                        className="w-full h-56 object-cover border-2 border-red-300 rounded-lg hover:border-red-500 transition cursor-pointer shadow-md"
-                                        onError={(e) => {
-                                          e.target.src =
-                                            "https://via.placeholder.com/300x250?text=Image+Not+Found";
-                                        }}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="col-span-12 xl:col-span-6 md:col-span-6 flex flex-col">
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <span className="text-xs font-bold bg-gray-100 text-gray-800 px-2 py-1 rounded">
-                                          ⊗ OUT
-                                        </span>
-                                        <span className="text-sm font-semibold text-gray-700">
-                                          Out Punch Image
-                                        </span>
-                                      </div>
-                                      <div className="w-full h-56 bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
-                                        <span className="text-gray-500 text-center">
-                                          No Out Punch Image
-                                        </span>
-                                      </div>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-
-                              {!inImage && !outImage && (
-                                <div className="col-span-12">
-                                  <div className="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
-                                    <p className="text-sm text-yellow-800 font-medium">
-                                      ⚠️ No punch images available for this date
-                                    </p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-gray-500 py-8 bg-gray-50 rounded-lg">
-                      <p className="text-lg">
-                        📭 No daily attendance records available
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* ✅ DAILY ATTENDANCE PAGINATION */}
-                {dailyAttendanceRows.length > 0 && (
-                  <div className="flex-shrink-0 border-t p-3 bg-gray-50 flex items-center justify-between flex-wrap gap-2 mt-4">
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm font-semibold text-gray-700">
-                        Records per page:
-                      </label>
-                      <select
-                        value={dailyPagination.pageSize}
-                        onChange={(e) => handleDailyPageSizeChange(parseInt(e.target.value))}
-                        className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
-                      >
-                        <option value={5}>5</option>
-                        <option value={10}>10</option>
-                        <option value={25}>25</option>
-                        <option value={50}>50</option>
-                      </select>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDailyPageChange(1)}
-                        disabled={dailyPagination.currentPage === 1}
-                        className="px-2 py-1 text-xs"
-                      >
-                        First
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDailyPageChange(dailyPagination.currentPage - 1)}
-                        disabled={dailyPagination.currentPage === 1}
-                        className="px-2 py-1 text-xs"
-                      >
-                        Previous
-                      </Button>
-
-                      <div className="text-sm font-semibold text-gray-700">
-                        Page {dailyPagination.currentPage} / {dailyPagination.totalPages}
+                  {dailyLoading ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="text-center text-gray-500 py-8 bg-gray-50 rounded-lg">
+                        Loading daily attendance records...
                       </div>
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDailyPageChange(dailyPagination.currentPage + 1)}
-                        disabled={dailyPagination.currentPage === dailyPagination.totalPages}
-                        className="px-2 py-1 text-xs"
-                      >
-                        Next
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDailyPageChange(dailyPagination.totalPages)}
-                        disabled={dailyPagination.currentPage === dailyPagination.totalPages}
-                        className="px-2 py-1 text-xs"
-                      >
-                        Last
-                      </Button>
                     </div>
-                  </div>
-                )}
+                  ) : dailyAttendanceRows.length > 0 ? (
+                    <div className="flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2">
+                      <div className="space-y-3 sm:space-y-4">
+                        {dailyAttendanceRows.map((item, index) => {
+                          const statusValue = item.Status?.trim() || "N/A";
+                          const inTime = item.InTime;
+                          const outTime = item.OutTime;
+
+                          const inImage =
+                            item.InPhotoUrl ||
+                            (item.InPhoto
+                              ? `https://erp.autovyn.com/backend/fetch?filePath=${item.InPhoto}`
+                              : "");
+                          const outImage =
+                            item.OutPhotoUrl ||
+                            (item.OutPhoto
+                              ? `https://erp.autovyn.com/backend/fetch?filePath=${item.OutPhoto}`
+                              : "");
+
+                          let statusColor = "bg-gray-50 border-l-4 border-gray-400";
+                          let statusBgColor = "bg-gray-200 text-gray-800";
+
+                          if (statusValue === "P" || statusValue.startsWith("P")) {
+                            statusColor = "bg-green-50 border-l-4 border-green-500";
+                            statusBgColor = "bg-green-200 text-green-800";
+                          } else if (statusValue === "A") {
+                            statusColor = "bg-red-50 border-l-4 border-red-500";
+                            statusBgColor = "bg-red-200 text-red-800";
+                          } else if (statusValue === "H") {
+                            statusColor = "bg-blue-50 border-l-4 border-blue-500";
+                            statusBgColor = "bg-blue-200 text-blue-800";
+                          } else if (statusValue === "WO") {
+                            statusColor = "bg-yellow-50 border-l-4 border-yellow-500";
+                            statusBgColor = "bg-yellow-200 text-yellow-800";
+                          } else if (statusValue === "LWP") {
+                            statusColor = "bg-purple-50 border-l-4 border-purple-500";
+                            statusBgColor = "bg-purple-200 text-purple-800";
+                          }
+
+                          return (
+                            <div
+                              key={index}
+                              className={`${statusColor} rounded-lg p-3 sm:p-4 shadow-sm hover:shadow-md transition`}
+                            >
+                              <div className="grid grid-cols-12 gap-2 sm:gap-3">
+                                <div className="col-span-12 font-bold text-base sm:text-lg text-gray-800 mb-1 sm:mb-2">
+                                  📆 {item.AttendanceDate}
+                                </div>
+
+                                <div className="col-span-4 flex flex-col">
+                                  <span className="text-xs sm:text-sm font-semibold text-gray-600 mb-1">
+                                    Status
+                                  </span>
+                                  <span
+                                    className={`font-bold text-sm sm:text-base px-2.5 py-0.5 rounded w-fit ${statusBgColor}`}
+                                  >
+                                    {statusValue}
+                                  </span>
+                                </div>
+
+                                <div className="col-span-4 flex flex-col">
+                                  <span className="text-xs sm:text-sm font-semibold text-gray-600 mb-1">
+                                    In Time
+                                  </span>
+                                  <span className="font-medium text-xs sm:text-sm text-gray-800 break-words">
+                                    {inTime && inTime !== "00:00:00"
+                                      ? inTime
+                                      : "—"}
+                                  </span>
+                                </div>
+
+                                <div className="col-span-4 flex flex-col">
+                                  <span className="text-xs sm:text-sm font-semibold text-gray-600 mb-1">
+                                    Out Time
+                                  </span>
+                                  <span className="font-medium text-xs sm:text-sm text-gray-800 break-words">
+                                    {outTime && outTime !== "00:00:00"
+                                      ? outTime
+                                      : "—"}
+                                  </span>
+                                </div>
+
+                                {(inImage || outImage) && (
+                                  <>
+                                    <div className="col-span-12">
+                                      <hr className="border-gray-300 my-2" />
+                                    </div>
+                                    <div className="col-span-12">
+                                      <div className="text-xs sm:text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                                        📸 Punch Images
+                                      </div>
+                                    </div>
+
+                                    {inImage ? (
+                                      <div className="col-span-12 sm:col-span-6 flex flex-col">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <span className="text-xs font-bold bg-green-100 text-green-800 px-2 py-0.5 rounded">
+                                            ✓ IN
+                                          </span>
+                                          <span className="text-xs sm:text-sm font-semibold text-gray-700">
+                                            In Punch Image
+                                          </span>
+                                        </div>
+                                        <img
+                                          src={inImage}
+                                          alt={`In Punch ${item.AttendanceDate}`}
+                                          className="w-full h-40 sm:h-48 md:h-56 object-cover border-2 border-green-300 rounded-lg hover:border-green-500 transition cursor-pointer shadow-md"
+                                          onError={(e) => {
+                                            e.target.src =
+                                              "https://via.placeholder.com/300x250?text=Image+Not+Found";
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="col-span-12 sm:col-span-6 flex flex-col">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <span className="text-xs font-bold bg-gray-100 text-gray-800 px-2 py-0.5 rounded">
+                                            ⊗ IN
+                                          </span>
+                                          <span className="text-xs sm:text-sm font-semibold text-gray-700">
+                                            In Punch Image
+                                          </span>
+                                        </div>
+                                        <div className="w-full h-40 sm:h-48 md:h-56 bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
+                                          <span className="text-gray-500 text-xs sm:text-sm text-center">
+                                            No In Punch Image
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {outImage ? (
+                                      <div className="col-span-12 sm:col-span-6 flex flex-col">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <span className="text-xs font-bold bg-red-100 text-red-800 px-2 py-0.5 rounded">
+                                            ✓ OUT
+                                          </span>
+                                          <span className="text-xs sm:text-sm font-semibold text-gray-700">
+                                            Out Punch Image
+                                          </span>
+                                        </div>
+                                        <img
+                                          src={outImage}
+                                          alt={`Out Punch ${item.AttendanceDate}`}
+                                          className="w-full h-40 sm:h-48 md:h-56 object-cover border-2 border-red-300 rounded-lg hover:border-red-500 transition cursor-pointer shadow-md"
+                                          onError={(e) => {
+                                            e.target.src =
+                                              "https://via.placeholder.com/300x250?text=Image+Not+Found";
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="col-span-12 sm:col-span-6 flex flex-col">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <span className="text-xs font-bold bg-gray-100 text-gray-800 px-2 py-0.5 rounded">
+                                            ⊗ OUT
+                                          </span>
+                                          <span className="text-xs sm:text-sm font-semibold text-gray-700">
+                                            Out Punch Image
+                                          </span>
+                                        </div>
+                                        <div className="w-full h-40 sm:h-48 md:h-56 bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
+                                          <span className="text-gray-500 text-xs sm:text-sm text-center">
+                                            No Out Punch Image
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+
+                                {!inImage && !outImage && (
+                                  <div className="col-span-12">
+                                    <div className="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                                      <p className="text-xs sm:text-sm text-yellow-800 font-medium">
+                                        ⚠️ No punch images available for this date
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="text-center text-gray-500 py-8 bg-gray-50 rounded-lg">
+                        <p className="text-base sm:text-lg">
+                          📭 No daily attendance records available
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </DialogContent>
           </Dialog>
@@ -1573,15 +1698,15 @@ const Approver2 = ({ back }) => {
       {/* ================= APPROVER LIST DIALOG WITH PAGINATION (APPROVAL REPORT ONLY) ================= */}
       {reportType === 1 && (
         <Dialog open={isModalVisible1} onOpenChange={setIsModalVisible1}>
-          <DialogContent className="w-full max-w-4xl lg:h-[600px] md:h-[600px] overflow-hidden flex flex-col">
+          <DialogContent className="w-[95vw] max-w-4xl h-[85vh] max-h-[600px] p-3 sm:p-6 overflow-hidden flex flex-col">
             <DialogHeader className="flex-shrink-0">
-              <DialogTitle>Approver List</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-base sm:text-lg">Approver List</DialogTitle>
+              <DialogDescription className="text-xs sm:text-sm">
                 Page {apprPagination.currentPage} of {apprPagination.totalPages} | Total Records: {apprPagination.totalRecords}
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
               {apprData.length === 0 ? (
                 <div className="text-center text-gray-500 py-10">
                   No Approver Found
@@ -1677,72 +1802,13 @@ const Approver2 = ({ back }) => {
                 </>
               )}
             </div>
-
-            {apprData.length > 0 && (
-              <div className="flex-shrink-0 border-t p-3 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-semibold text-gray-700">
-                    Records per page:
-                  </label>
-                  <select
-                    value={apprPagination.pageSize}
-                    onChange={(e) => handleApproverPageSizeChange(parseInt(e.target.value))}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
-                  >
-                    <option value={5}>5</option>
-                    <option value={10}>10</option>
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleApproverPageChange(1)}
-                    disabled={apprPagination.currentPage === 1}
-                    className="px-2 py-1 text-xs"
-                  >
-                    First
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleApproverPageChange(apprPagination.currentPage - 1)}
-                    disabled={apprPagination.currentPage === 1}
-                    className="px-2 py-1 text-xs"
-                  >
-                    Previous
-                  </Button>
-
-                  <div className="text-sm font-semibold text-gray-700">
-                    Page {apprPagination.currentPage} / {apprPagination.totalPages}
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleApproverPageChange(apprPagination.currentPage + 1)}
-                    disabled={apprPagination.currentPage === apprPagination.totalPages}
-                    className="px-2 py-1 text-xs"
-                  >
-                    Next
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleApproverPageChange(apprPagination.totalPages)}
-                    disabled={apprPagination.currentPage === apprPagination.totalPages}
-                    className="px-2 py-1 text-xs"
-                  >
-                    Last
-                  </Button>
-                </div>
-              </div>
-            )}
           </DialogContent>
         </Dialog>
+      )}
+      {isClicked && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/20 backdrop-blur-sm pointer-events-auto [&>div]:!bg-transparent [&>div]:!z-[99999]">
+          <HashloaderComponent isLoading={true} />
+        </div>
       )}
     </div>
   );

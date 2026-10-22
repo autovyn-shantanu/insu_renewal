@@ -3,11 +3,12 @@ import { useState, useEffect } from 'react';
 // Custom hook to manage date range
 export const useDateRange = (initialFrom = null, initialTo = null) => {
   const [dateRange, setDateRange] = useState(() => {
-    const savedRange = localStorage.getItem('dateRange');
-    if (savedRange) {
-      return JSON.parse(savedRange);
+    if (typeof window !== 'undefined') {
+      const savedRange = localStorage.getItem('dateRange');
+      if (savedRange) {
+        return JSON.parse(savedRange);
+      }
     }
-
     return {
       from: initialFrom,
       to: initialTo,
@@ -15,7 +16,9 @@ export const useDateRange = (initialFrom = null, initialTo = null) => {
   });
 
   useEffect(() => {
-    localStorage.setItem('dateRange', JSON.stringify(dateRange));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dateRange', JSON.stringify(dateRange));
+    }
   }, [dateRange]);
 
   return [dateRange, setDateRange];

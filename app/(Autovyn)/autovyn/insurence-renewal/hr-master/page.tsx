@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import Swal from "sweetalert2";
-import AButton from "@/components/atoms/Buttton";
 import Ainput from "@/components/atoms/Einput";
-import Eselect from "@/components/atoms/Eselect";
+import SelectSearch from "@/components/atoms/Select";
+import { Button } from "@/components/ui/button";
 import ServiceTabel from "@/components/Templates/Servicetable";
-import ChartCard from "@/components/chartcard";
 import { onlybranch } from "@/action/branch";
 import { useCurrentUser } from "@/app/hooks/use-current-user";
 import {
@@ -17,11 +16,15 @@ import {
     Layers,
     Settings,
     AlertCircle,
-    BarChart3,
     CheckCircle2,
     RefreshCw,
     Database,
     Timer,
+    HelpCircle,
+    X,
+    Search,
+    BookOpen,
+    Info,
 } from "lucide-react";
 
 // ============================================================
@@ -32,14 +35,40 @@ const POLICY_TYPE_OPTIONS = [
     { value: "Mispunch", label: "Mispunch Policy" },
 ];
 
+const LEAVE_TYPE_OPTIONS = [
+    { label: "CL - Casual Leave", value: "CL" },
+    { label: "PL -   Paid Leave", value: "PL" },
+    { label: "SL - Sick Leave", value: "SL" },
+    { label: "CO - Comp Off", value: "CO" },
+    { label: "HCL - Half Casual Leave", value: "HCL" },
+    { label: "HPL - Half Paid Leave", value: "HPL" },
+    { label: "HSL - Half Sick Leave", value: "HSL" },
+    { label: "HESL - Half Earned Sick Leave", value: "HESL" },
+    { label: "HSSL - Half Special Sick Leave", value: "HSSL" },
+    { label: "HCO - Half Comp Off", value: "HCO" },
+];
+
+const LEAVE_TYPE_MAP: Record<string, { code: number; name: string }> = {
+    CL: { code: 4, name: "CASUAL LEAVE" },
+    PL: { code: 5, name: "Paid LEAVE" },
+    SL: { code: 6, name: "SICK LEAVE" },
+    CO: { code: 9, name: "COMP OFF" },
+    HCL: { code: 10, name: "HALF CASUAL LEAVE" },
+    HPL: { code: 120, name: "HALF PAID LEAVE" },
+    HSL: { code: 121, name: "HALF SICK LEAVE" },
+    HESL: { code: 122, name: "HALF EARNED SICK LEAVE" },
+    HSSL: { code: 123, name: "HALF SPECIAL SICK LEAVE" },
+    HCO: { code: 104, name: "HALF COMP OFF" },
+};
+
 const STATUS_OPTIONS = [
     { label: "ACTIVE", value: "ACTIVE" },
     { label: "INACTIVE", value: "INACTIVE" },
 ];
 
 const APP_TYPE_OPTIONS = [
-    { label: "Mobile App", value: "Mobile App" },
-    { label: "Web App", value: "Web App" },
+    { label: "USER & HR", value: "USER & HR" },
+    { label: "HR", value: "HR" },
 ];
 
 const ASSESSABLE_TYPE_OPTIONS = [
@@ -84,13 +113,204 @@ const InTimeOptions = [
 ];
 
 const CARRY_FORWARD_OPTIONS = [
-    { label: "No (0 - Lapses at year end)", value: "0" },
-    { label: "Yes (1 - Carried forward)", value: "1" },
+    { label: "1 (Leave addon in next month)", value: "1" },
+    { label: "NULL (Leave not addon in next month)", value: "null" },
 ];
 
 const BACK_DATE_OPTIONS = [
-    { label: "Back Date NOT Allowed (1)", value: "1" },
-    { label: "Back Date Allowed (NULL)", value: "null" },
+    { label: "Back Date NOT Allowed ", value: "1" },
+    { label: "Back Date Allowed ", value: "null" },
+];
+
+const MIN_BALANCE_OPTIONS = [
+    { label: "1", value: "1" },
+    { label: "0.5", value: "0.5" },
+];
+
+const FIELD_GUIDE_SECTIONS = [
+    {
+        id: "core",
+        title: "1. Core Policy Setup",
+        icon: Layers,
+        items: [
+            {
+                title: "Policy Mode (Leave vs. Mispunch)",
+                keywords: "policy mode type leave mispunch core setup",
+                content: (
+                    <>
+                        <strong>Leave Policy:</strong> Use for employee leaves (like CL, PL, SL) to deduct leave balance and set monthly limits.<br />
+                        <strong>Mispunch Policy:</strong> Use when employee came to office but forgot to punch in/out.
+                    </>
+                ),
+            },
+            {
+                title: "Leave Type (Predefined Categories)",
+                keywords: "leave type categories cl pl sl co hcl hpl hsl hesl hssl hco master",
+                content: (
+                    <>
+                        Main leave categories: <strong>CL</strong> (Casual), <strong>PL</strong> (Paid), <strong>SL</strong> (Sick), <strong>CO</strong> (Comp Off), <strong>HCL</strong>, <strong>HPL</strong>, <strong>HSL</strong>, <strong>HESL</strong>, <strong>HSSL</strong>, <strong>HCO</strong>.<br />
+                        Selecting a type loads existing setup or creates a new policy under that type.
+                    </>
+                ),
+            },
+            {
+                title: "Status (Mispunch Status)",
+                keywords: "status mispunch abbr abbreviation mp tr to code short",
+                content: (
+                    <>
+                        Short code for mispunch reason (e.g. <strong>MP</strong> for Mispunch, <strong>TR</strong> for Traffic Delay, <strong>TO</strong> for Tour/Outdoor Duty).
+                    </>
+                ),
+            },
+        ],
+    },
+    {
+        id: "reason",
+        title: "2. Reason Name & Attendance Values",
+        icon: Settings,
+        items: [
+            {
+                title: "Reason Name / Leave Name",
+                keywords: "reason name leave name policy title descriptive identity",
+                content: (
+                    <>
+                        Full name that employees will see in dropdown when applying (e.g., <em>"Casual Leave"</em>, <em>"Paid Leave"</em>, or <em>"Mispunch - Traffic Delay"</em>).
+                    </>
+                ),
+            },
+            {
+                title: "Present Value & Absent Value",
+                keywords: "present value absent score attendance credit penalty actual dtl1 dtl2",
+                content: (
+                    <>
+                        <strong>Present Value:</strong> Gives attendance on approval: <strong>1.0</strong> = Full Day, <strong>0.5</strong> = Half Day, <br />
+                        <strong>0</strong> = No Present.<br />
+                        <strong>Absent Value:</strong> Marks employee as absent: <strong>1.0</strong> = Full Day, <strong>0.5</strong> = Half Day, <br /> <strong>0</strong> = Not Absent.
+                    </>
+                ),
+            },
+            {
+                title: "Leave Value (ERP)",
+                keywords: "leave value erp dtl3 deduction full half day calculation",
+                colSpan: true,
+                content: (
+                    <>
+                        Deducts leave from balance in ERP: <strong>1.0</strong> = Full Day Leave, <strong>0.5</strong> = Half Day Leave (for Mispunch enter <strong>0</strong>).
+                    </>
+                ),
+            },
+        ],
+    },
+    {
+        id: "limit",
+        title: "3. Monthly Leave Limit & Cloud Leave Value",
+        icon: CalendarCheck,
+        items: [
+            {
+                title: "Monthly Leave Limit (Count)",
+                keywords: "monthly leave limit count max frequency num1 unlimited quota",
+                content: (
+                    <>
+                        How many times an employee can apply for this leave in Current month (enter <strong>0</strong> for unlimited).
+                    </>
+                ),
+            },
+            {
+                title: "Leave Value (Cloud)",
+                keywords: "leave value cloude mobile app num2 weight score cloud",
+                content: (
+                    <>
+                        Deducts leave from balance on Cloud / Mobile App: <strong>1.0</strong> = Full Day, <strong>0.5</strong> = Half Day, <br /> <strong>0</strong> = None.
+                    </>
+                ),
+            },
+        ],
+    },
+    {
+        id: "rules",
+        title: "4. Leave Policy Constraints & Quota Rules",
+        icon: CalendarCheck,
+        items: [
+            {
+                title: "Leave / Assessable Type",
+                keywords: "assessable column salary calculation lwp without pay full half day assessable_column",
+                content: (
+                    <>
+                        <strong>1:</strong> Full Day Leave (cuts 1 paid day).<br />
+                        <strong>2:</strong> Half Day Leave (cuts 0.5 paid day).<br />
+                        <strong>3:</strong> Full LWP (Full Day Leave Without Pay - no salary).<br />
+                        <strong>4:</strong> Half LWP (Half Day Leave Without Pay - no salary).
+                    </>
+                ),
+            },
+            {
+                title: "Minimum Value (MIN_VALUE)",
+                keywords: "minimum bal balance req min_value eligible balance required min half day",
+                content: (
+                    <>
+                        Used only for Half day leaves. For example: <br /> <strong>1</strong> = only assessable for full day leave, <strong>0.5</strong> = assessable for both full day and half day leaves.
+                    </>
+                ),
+            },
+            {
+                title: "Continuous Max Days",
+                keywords: "continuous max days consecutive stretch limit continuous_max",
+                content: (
+                    <>
+                        Maximum number of leave days that can be taken together in one go (e.g. max 3 days in a row).
+                    </>
+                ),
+            },
+            {
+                title: "Days Front (CC_Group) & Days Back (CC_Ledg)",
+                keywords: "days front cc_group advance back cc_ledg retroactive past future notice",
+                content: (
+                    <>
+                        <strong>Days Front (CC_Group):</strong> How many days in advance employee can apply for leave / mispunch.<br />
+                        <strong>Days Back (CC_Ledg):</strong> How many past days an employee can apply for leave / mispunch after taking it.
+                    </>
+                ),
+            },
+            {
+                title: "Carry Forward (is_carry)",
+                keywords: "carry forward is_carry balance lapse addon 1 null next month",
+                content: (
+                    <>
+                        <strong>1:</strong> Add remaining leave balance to next month.<br />
+                        <strong>NULL:</strong> Do not add to next month (unused leave will expire).
+                    </>
+                ),
+            },
+            {
+                title: "Back Date Rule (dis_back_date)",
+                keywords: "back date rule dis_back_date allowed blocked past retroactive dis_back_date",
+                content: (
+                    <>
+                        <strong>Allowed (NULL):</strong> Allow applying for past dates.<br />
+                        <strong>Blocked (1):</strong> Block applying for past dates (can only apply for today or future dates).
+                    </>
+                ),
+            },
+        ],
+    },
+    {
+        id: "access",
+        title: "5. Policy Access Target (User & HR vs. HR Portal)",
+        icon: ShieldCheck,
+        items: [
+            {
+                title: "Policy Type",
+                keywords: "user hr portal export_type app_type target access audience mobile self service",
+                colSpan: true,
+                content: (
+                    <>
+                        <strong>USER & HR:</strong> Available for employees on Mobile App & Self-Service Portal so they can apply.<br />
+                        <strong>HR:</strong> Only accessable to Hr Admin portal.
+                    </>
+                ),
+            },
+        ],
+    },
 ];
 
 // ============================================================
@@ -119,29 +339,35 @@ export default function LeaveMispunchPolicyPage() {
     const [policyType, setPolicyType] = useState<"Leave" | "Mispunch">("Leave");
     const [formData, setFormData] = useState({
         Misc_Name: "",
-        Misc_Abbr: "ACTIVE",
-        Misc_Dtl1: "Actual",
-        Misc_Dtl2: "Actual",
-        Misc_Dtl3: "1",
-        Misc_Num1: "0", // In-Time Status (0=Actual, 1=Shift Time, 2=Not Required)
-        Misc_Num2: "0", // Out-Time Status (0=Actual, 1=Shift Time, 2=Not Required)
+        Misc_Abbr: "",
+        Misc_Dtl1: "",
+        Misc_Dtl2: "",
+        Misc_Dtl3: "",
+        Misc_Num1: "",
+        Misc_Num2: "",
         Loc_Code: "",
-        CC_Group: "0", // Days Front / Apply Before Days
-        CC_Ledg: "0", // Days Back / Apply After Days
-        Assessable_Column: "1", // 1=Full, 2=Half, 3=LWP, 4=Half LWP
-        MIN_VALUE: "0", // Minimum Bal Req.
-        Continuous_Max: "3", // Max continuous leave days
-        is_carry: "0", // Carry Forward (0=No, 1=Yes)
-        dis_back_date: "null", // 1 = NOT allowed, null = Allowed
-        App_Type: "Mobile App",
+        CC_Group: "",
+        CC_Ledg: "",
+        Assessable_Column: "",
+        MIN_VALUE: "",
+        Continuous_Max: "",
+        is_carry: "",
+        dis_back_date: "",
+        Policy_type: "",
     });
 
     const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
     const [branchOptions, setBranchOptions] = useState<{ value: string; label: string }[]>([]);
     const [isLoadingBranches, setIsLoadingBranches] = useState(false);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isUpdating, setIsUpdating] = useState(false);
     const [isLoadingTable, setIsLoadingTable] = useState(false);
     const [policyList, setPolicyList] = useState<any[]>([]);
+    const [editingMiscCode, setEditingMiscCode] = useState<number | string | null>(null);
+    const [editingUtd, setEditingUtd] = useState<number | string | null>(null);
+    const [isHelpOpen, setIsHelpOpen] = useState(false);
+    const [helpSearch, setHelpSearch] = useState("");
+    const topRef = useRef<HTMLDivElement>(null);
 
     // -----------------------------------------------------------
     // Fetch Locations / Branches
@@ -184,12 +410,15 @@ export default function LeaveMispunchPolicyPage() {
         setIsLoadingTable(true);
         try {
             const response = await axios.post(
-                `${process.env.NEXT_PUBLIC_URL}/Crm/getLeaveMispunchPolicies`,
-                {},
+                `${process.env.NEXT_PUBLIC_URL}/DefaultMaster/getLeaveMispunchPolicies`,
+                {
+                    Loc_Code: user?.branch,
+                },
                 {
                     headers: {
                         compcode: user?.Comp_Code,
                         name: user?.name,
+
                     },
                 }
             );
@@ -202,18 +431,13 @@ export default function LeaveMispunchPolicyPage() {
                         : "NULL (Mispunch)";
 
                     const appTypeLabel =
-                        item.Export_Type === 1
-                            ? "Mobile App"
-                            : item.Export_Type === 2
-                                ? "Web App"
+                        item.Export_Type === 1 || item.Export_Type === "1" || item.App_Type === "User" || item.App_Type === "USER & HR" || item.App_Type === "USER&HR"
+                            ? "USER & HR"
+                            : item.Export_Type === 2 || item.Export_Type === "2" || item.App_Type === "HR"
+                                ? "HR"
                                 : item.App_Type || "-";
 
-                    const formatTimeStatus = (val: any) => {
-                        if (val === 0 || val === "0") return "Actual (0)";
-                        if (val === 1 || val === "1") return "Shift Time (1)";
-                        if (val === 2 || val === "2") return "Not Required (2)";
-                        return "-";
-                    };
+                    const isMinOne = item.MIN_VALUE === 1 || item.MIN_VALUE === "1" || item.MIN_VALUE === 1.0 || item.MIN_VALUE === "1.0";
 
                     return {
                         id: item.UTD || item.Misc_Code,
@@ -226,22 +450,23 @@ export default function LeaveMispunchPolicyPage() {
                         Loc_Name: item.Loc_Name || item.Loc_code,
                         Assessable_Column: assessLabel,
                         rawAssessable: item.Assessable_Column,
-                        Misc_Num1: formatTimeStatus(item.Misc_Num1),
+                        Misc_Num1: item.Misc_Num1 !== null && item.Misc_Num1 !== undefined ? String(item.Misc_Num1) : "-",
                         rawMiscNum1: item.Misc_Num1?.toString() ?? "0",
-                        Misc_Num2: formatTimeStatus(item.Misc_Num2),
+                        Misc_Num2: item.Misc_Num2 !== null && item.Misc_Num2 !== undefined ? String(item.Misc_Num2) : "-",
                         rawMiscNum2: item.Misc_Num2?.toString() ?? "0",
                         Misc_Dtl1: item.Misc_Dtl1 || "-",
                         Misc_Dtl2: item.Misc_Dtl2 || "-",
                         Misc_Dtl3: item.Misc_Dtl3 ?? "-",
                         CC_Group: item.CC_Group ?? "-",
                         CC_Ledg: item.CC_Ledg ?? "-",
-                        MIN_VALUE: item.MIN_VALUE ?? "-",
+                        MIN_VALUE: isMinOne ? "1" : "NULL",
+                        rawMinValue: isMinOne ? "1" : "0.5",
                         Continuous_Max: item.Continuous_Max ?? "-",
-                        is_carry: item.is_carry === 1 ? "Yes" : (item.is_carry === 0 ? "No" : "-"),
-                        rawCarry: item.is_carry?.toString() ?? "0",
+                        is_carry: item.is_carry === 1 ? "1 (Addon in next month)" : "NULL (Not addon in next month)",
+                        rawCarry: item.is_carry === 1 ? "1" : "null",
                         dis_back_date: item.dis_back_date === 1 ? "Not Allowed (1)" : "Allowed (NULL)",
                         rawBackDate: item.dis_back_date === 1 ? "1" : "null",
-                        App_Type: appTypeLabel,
+                        Policy_type: appTypeLabel,
                     };
                 });
 
@@ -257,6 +482,49 @@ export default function LeaveMispunchPolicyPage() {
     useEffect(() => {
         fetchPolicies();
     }, [user]);
+
+    // -----------------------------------------------------------
+    // Dynamic Leave Name Options (Extracted from Table / Master List)
+    // -----------------------------------------------------------
+    const leaveNameOptions = useMemo(() => {
+        const namesFromTable = policyList
+            .filter((p) => p.policyType === "Leave" && p.Misc_Name)
+            .map((p) => p.Misc_Name.trim().toUpperCase());
+
+
+
+        const uniqueNames = Array.from(new Set([...namesFromTable]));
+        return uniqueNames.map((name) => ({
+            value: name,
+            label: name,
+        }));
+    }, [policyList]);
+
+    // -----------------------------------------------------------
+    // Check if the currently entered/selected policy exists in the table
+    // -----------------------------------------------------------
+    const isPolicyInTable = useMemo(() => {
+        if (policyType === "Leave") {
+            const currentAbbr = (formData.Misc_Abbr || "").trim().toUpperCase();
+            const currentName = (formData.Misc_Name || "").trim().toUpperCase();
+            const mappedCode = currentAbbr && LEAVE_TYPE_MAP[currentAbbr] ? LEAVE_TYPE_MAP[currentAbbr].code : null;
+
+            return policyList.some(
+                (p) =>
+                    p.policyType === "Leave" &&
+                    ((mappedCode && Number(p.Misc_Code) === mappedCode) ||
+                        (currentAbbr && String(p.Misc_Abbr || "").trim().toUpperCase() === currentAbbr) ||
+                        (currentName && String(p.Misc_Name || "").trim().toUpperCase() === currentName) ||
+                        (editingMiscCode && Number(p.Misc_Code) === Number(editingMiscCode)) ||
+                        (editingUtd && p.UTD === editingUtd))
+            );
+        } else {
+            return Boolean(
+                (editingMiscCode && policyList.some((p) => p.policyType === "Mispunch" && Number(p.Misc_Code) === Number(editingMiscCode))) ||
+                (editingUtd && policyList.some((p) => p.policyType === "Mispunch" && p.UTD === editingUtd))
+            );
+        }
+    }, [policyType, formData.Misc_Abbr, formData.Misc_Name, editingMiscCode, editingUtd, policyList]);
 
     // -----------------------------------------------------------
     // Handle Input Changes
@@ -279,38 +547,61 @@ export default function LeaveMispunchPolicyPage() {
         const selected = value === "Mispunch" ? "Mispunch" : "Leave";
         setPolicyType(selected);
         setValidationErrors({});
+        setEditingMiscCode(null);
+        setEditingUtd(null);
 
-        if (selected === "Mispunch") {
+        setFormData({
+            Misc_Name: "",
+            Misc_Abbr: "",
+            Misc_Dtl1: "",
+            Misc_Dtl2: "",
+            Misc_Dtl3: "",
+            Misc_Num1: "",
+            Misc_Num2: "",
+            Loc_Code: user?.branch ? String(user.branch) : (branchOptions[0]?.value || ""),
+            CC_Group: "",
+            CC_Ledg: "",
+            Assessable_Column: "",
+            MIN_VALUE: "",
+            Continuous_Max: "",
+            is_carry: "",
+            dis_back_date: "",
+            Policy_type: "",
+        });
+    };
+
+    // -----------------------------------------------------------
+    // Handle Leave Type Dropdown Selection (Auto-Update or New Save)
+    // -----------------------------------------------------------
+    const handleLeaveTypeChange = (name: string, value: string) => {
+        handleInputChange(name, value);
+        const mapping = LEAVE_TYPE_MAP[value];
+        if (!mapping) return;
+
+        const targetCode = mapping.code;
+        // Check if a policy with this Misc_Code or Misc_Abbr already exists in policyList
+        const existingPolicy = policyList.find(
+            (p) =>
+                (Number(p.Misc_Code) === targetCode || String(p.Misc_Abbr || "").toUpperCase() === value.toUpperCase()) &&
+                p.policyType === "Leave"
+        );
+
+        if (existingPolicy) {
+            // Populate form with existing policy data for updating
+            handleRowDoubleClick(existingPolicy);
             setFormData((prev) => ({
                 ...prev,
-                Misc_Name: prev.Misc_Name.includes("LEAVE") ? "MISPUNCH" : prev.Misc_Name,
-                Misc_Dtl1: "Actual",
-                Misc_Dtl2: "Actual",
-                Misc_Dtl3: "0",
-                Misc_Num1: "0",
-                Misc_Num2: "0",
-                Assessable_Column: "",
-                CC_Group: "0",
-                CC_Ledg: "0",
-                MIN_VALUE: "0",
-                Continuous_Max: "0",
-                is_carry: "0",
+                Misc_Abbr: value,
             }));
+            // showToast(`Loaded existing "${existingPolicy.Misc_Name}" (Code: ${targetCode}) for Update`, "info");
         } else {
+            // New entry with fixed Misc_Code and Misc_Abbr
+            setEditingMiscCode(null);
+            setEditingUtd(null);
             setFormData((prev) => ({
                 ...prev,
-                Misc_Name: prev.Misc_Name === "MISPUNCH" ? "CASUAL LEAVE" : prev.Misc_Name,
-                Misc_Dtl1: "Actual",
-                Misc_Dtl2: "Actual",
-                Misc_Dtl3: "1",
-                Misc_Num1: "0",
-                Misc_Num2: "0",
-                Assessable_Column: "1",
-                CC_Group: "0",
-                CC_Ledg: "0",
-                MIN_VALUE: "0",
-                Continuous_Max: "3",
-                is_carry: "0",
+                Misc_Abbr: value,
+                Misc_Name: mapping.name,
             }));
         }
     };
@@ -335,25 +626,46 @@ export default function LeaveMispunchPolicyPage() {
     const handleRowDoubleClick = (rowData: any) => {
         const pType = rowData.policyType === "Leave" ? "Leave" : "Mispunch";
         setPolicyType(pType);
+        setEditingMiscCode(rowData.Misc_Code);
+        setEditingUtd(rowData.UTD || null);
         setFormData({
             Misc_Name: rowData.Misc_Name || "",
-            Misc_Abbr: rowData.Misc_Abbr || "ACTIVE",
-            Misc_Dtl1: rowData.Misc_Dtl1 || "Actual",
-            Misc_Dtl2: rowData.Misc_Dtl2 || "Actual",
-            Misc_Dtl3: String(rowData.Misc_Dtl3 ?? "0"),
+            Misc_Abbr: rowData.Misc_Abbr || "",
+            Misc_Dtl1: rowData.Misc_Dtl1 === "-" ? "Actual" : (rowData.Misc_Dtl1 || "Actual"),
+            Misc_Dtl2: rowData.Misc_Dtl2 === "-" ? "Actual" : (rowData.Misc_Dtl2 || "Actual"),
+            Misc_Dtl3: String(rowData.Misc_Dtl3 === "-" ? (pType === "Leave" ? "1" : "0") : (rowData.Misc_Dtl3 ?? "0")),
             Misc_Num1: rowData.rawMiscNum1 || "0",
             Misc_Num2: rowData.rawMiscNum2 || "0",
             Loc_Code: String(rowData.Loc_Code || ""),
             CC_Group: String(rowData.CC_Group === "-" ? "0" : rowData.CC_Group || "0"),
             CC_Ledg: String(rowData.CC_Ledg === "-" ? "0" : rowData.CC_Ledg || "0"),
             Assessable_Column: rowData.rawAssessable ? String(rowData.rawAssessable) : (pType === "Leave" ? "1" : ""),
-            MIN_VALUE: String(rowData.MIN_VALUE === "-" ? "0" : rowData.MIN_VALUE || "0"),
+            MIN_VALUE: rowData.rawMinValue ? String(rowData.rawMinValue) : (rowData.MIN_VALUE === "1" || rowData.MIN_VALUE === 1 ? "1" : "0.5"),
             Continuous_Max: String(rowData.Continuous_Max === "-" ? "0" : rowData.Continuous_Max || "0"),
-            is_carry: rowData.rawCarry || "0",
+            is_carry: rowData.rawCarry || "null",
             dis_back_date: rowData.rawBackDate || "null",
-            App_Type: rowData.App_Type?.includes("Web") ? "Web App" : "Mobile App",
+            Policy_type: (rowData.Policy_type || rowData.App_Type) === "HR" ? "HR" : "USER & HR",
         });
-        showToast(`Loaded policy: ${rowData.Misc_Name}`, "info");
+
+        // Auto scroll to top of the page smoothly across all scrollable containers
+        setTimeout(() => {
+            if (topRef.current) {
+                topRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+            if (typeof window !== "undefined") {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+            if (typeof document !== "undefined") {
+                document.documentElement.scrollTo({ top: 0, behavior: "smooth" });
+                document.body.scrollTo({ top: 0, behavior: "smooth" });
+                const scrollContainers = document.querySelectorAll(
+                    "main, [class*='overflow-y-auto'], [class*='overflow-auto'], [class*='overflow-y-scroll']"
+                );
+                scrollContainers.forEach((el) => {
+                    el.scrollTo({ top: 0, behavior: "smooth" });
+                });
+            }
+        }, 50);
     };
 
     // -----------------------------------------------------------
@@ -366,16 +678,18 @@ export default function LeaveMispunchPolicyPage() {
             errors.Misc_Name = "Policy Name is required";
         }
 
-        if (!formData.Misc_Abbr || !formData.Misc_Abbr.trim()) {
-            errors.Misc_Abbr = "Status is required";
+        if (policyType === "Leave") {
+            if (!formData.Misc_Abbr || !formData.Misc_Abbr.trim()) {
+                errors.Misc_Abbr = "Leave Type is required";
+            }
+        } else {
+            if (!formData.Misc_Abbr || !formData.Misc_Abbr.trim()) {
+                errors.Misc_Abbr = "Abbreviation (Misc_Abbr) is required";
+            }
         }
 
-        if (!formData.Loc_Code || formData.Loc_Code.trim() === "") {
-            errors.Loc_Code = "Location is required";
-        }
-
-        if (!formData.App_Type || (formData.App_Type !== "Mobile App" && formData.App_Type !== "Web App")) {
-            errors.App_Type = "Valid Application Type is required";
+        if (!formData.Policy_type || (formData.Policy_type !== "USER & HR" && formData.Policy_type !== "User" && formData.Policy_type !== "HR")) {
+            errors.Policy_type = "Valid Policy Type is required";
         }
 
         if (policyType === "Leave") {
@@ -387,21 +701,21 @@ export default function LeaveMispunchPolicyPage() {
                 errors.Assessable_Column = "Assessable Leave Type is required";
             }
 
-            if (formData.MIN_VALUE === "" || isNaN(Number(formData.MIN_VALUE)) || Number(formData.MIN_VALUE) < 0) {
-                errors.MIN_VALUE = "Minimum Leave Balance must be >= 0";
+            if (formData.MIN_VALUE === "" || (formData.MIN_VALUE !== "1" && formData.MIN_VALUE !== "0.5")) {
+                errors.MIN_VALUE = "Minimum Value is required (1 or 0.5)";
             }
 
             if (formData.Continuous_Max === "" || isNaN(Number(formData.Continuous_Max)) || Number(formData.Continuous_Max) < 0) {
                 errors.Continuous_Max = "Continuous Max must be >= 0";
             }
+        }
 
-            if (formData.CC_Group !== "" && (isNaN(Number(formData.CC_Group)) || Number(formData.CC_Group) < 0)) {
-                errors.CC_Group = "Must be a valid positive number";
-            }
+        if (formData.CC_Group !== "" && (isNaN(Number(formData.CC_Group)) || Number(formData.CC_Group) < 0)) {
+            errors.CC_Group = "Must be a valid positive number";
+        }
 
-            if (formData.CC_Ledg !== "" && (isNaN(Number(formData.CC_Ledg)) || Number(formData.CC_Ledg) < 0)) {
-                errors.CC_Ledg = "Must be a valid positive number";
-            }
+        if (formData.CC_Ledg !== "" && (isNaN(Number(formData.CC_Ledg)) || Number(formData.CC_Ledg) < 0)) {
+            errors.CC_Ledg = "Must be a valid positive number";
         }
 
         setValidationErrors(errors);
@@ -409,10 +723,10 @@ export default function LeaveMispunchPolicyPage() {
     };
 
     // -----------------------------------------------------------
-    // Form Submit Handler
+    // Save Handler (Insert New Policy)
     // -----------------------------------------------------------
-    const handleSubmit = async () => {
-        if (user?.branch?.toString().includes(",")) {
+    const handleSave = async () => {
+        if (typeof user?.branch === "string" || user?.branch?.toString().includes(",")) {
             Swal.fire({
                 icon: "warning",
                 title: "Not Allowed",
@@ -422,42 +736,64 @@ export default function LeaveMispunchPolicyPage() {
         }
 
         if (!validateForm()) {
-            showToast("Please fix the errors in the form before submitting", "warning");
+            showToast("Please fill required fields before submitting it", "warning");
             return;
         }
 
-        setIsSubmitting(true);
+        const isLeave = policyType === "Leave";
+        const fixedLeaveCode = isLeave && formData.Misc_Abbr && LEAVE_TYPE_MAP[formData.Misc_Abbr]
+            ? LEAVE_TYPE_MAP[formData.Misc_Abbr].code
+            : undefined;
+
+        // If Leave Type or Policy already exists in table, warn user to use Update button
+        if (isLeave && fixedLeaveCode) {
+            const alreadyExists = policyList.some(
+                (p) =>
+                    (Number(p.Misc_Code) === fixedLeaveCode || String(p.Misc_Abbr || "").toUpperCase() === String(formData.Misc_Abbr || "").toUpperCase()) &&
+                    p.policyType === "Leave"
+            );
+            if (alreadyExists || (editingMiscCode && isPolicyInTable)) {
+                showToast("This Leave Policy already exists. Please use the Update button.", "warning");
+                return;
+            }
+        } else if (editingMiscCode && isPolicyInTable) {
+            showToast("Policy already selected. Please use the Update button to modify it.", "warning");
+            return;
+        }
+
+        setIsSaving(true);
 
         try {
-            const isLeave = policyType === "Leave";
 
             const payload: Record<string, any> = {
+                Misc_Code: fixedLeaveCode,
                 Misc_Name: formData.Misc_Name.trim().toUpperCase(),
-                Misc_Abbr: formData.Misc_Abbr.trim(),
+                Misc_Abbr: formData.Misc_Abbr ? formData.Misc_Abbr.trim() : (isLeave ? "CL" : ""),
                 Misc_Dtl1: formData.Misc_Dtl1 || "Actual",
                 Misc_Dtl2: formData.Misc_Dtl2 || "Actual",
-                Misc_Dtl3: isLeave ? String(formData.Misc_Dtl3) : "0",
+                Misc_Dtl3: isLeave ? String(formData.Misc_Dtl3 || "0") : "0",
                 Misc_Num1: formData.Misc_Num1 !== "" && formData.Misc_Num1 !== null ? Number(formData.Misc_Num1) : 0,
                 Misc_Num2: formData.Misc_Num2 !== "" && formData.Misc_Num2 !== null ? Number(formData.Misc_Num2) : 0,
-                Loc_Code: Number(formData.Loc_Code),
-                App_Type: formData.App_Type,
+                Loc_Code: Number(formData.Loc_Code || user?.branch || branchOptions[0]?.value || 0),
+                App_Type: formData.Policy_type || "USER & HR",
                 dis_back_date: formData.dis_back_date === "1" ? 1 : null,
+                CC_Group: formData.CC_Group !== "" ? Number(formData.CC_Group) : 0,
+                CC_Ledg: formData.CC_Ledg !== "" ? Number(formData.CC_Ledg) : 0,
             };
 
             if (isLeave) {
                 payload.Assessable_Column = Number(formData.Assessable_Column);
                 payload.CC_Group = formData.CC_Group !== "" ? Number(formData.CC_Group) : 0;
                 payload.CC_Ledg = formData.CC_Ledg !== "" ? Number(formData.CC_Ledg) : 0;
-                payload.MIN_VALUE = formData.MIN_VALUE !== "" ? Number(formData.MIN_VALUE) : 0;
+                payload.MIN_VALUE = formData.MIN_VALUE === "1" ? 1 : null;
                 payload.Continuous_Max = formData.Continuous_Max !== "" ? Number(formData.Continuous_Max) : 0;
-                payload.is_carry = formData.is_carry === "1" ? 1 : 0;
+                payload.is_carry = formData.is_carry === "1" ? 1 : null;
             } else {
-                // Mispunch: Assessable_Column must be null
                 payload.Assessable_Column = null;
             }
 
             const response = await axios.post(
-                `${process.env.NEXT_PUBLIC_URL}/Crm/insertLeaveMispunchPolicy`,
+                `${process.env.NEXT_PUBLIC_URL}/DefaultMaster/insertLeaveMispunchPolicy`,
                 payload,
                 {
                     headers: {
@@ -469,11 +805,7 @@ export default function LeaveMispunchPolicyPage() {
 
             if (response.data?.success) {
                 showToast(response.data.message || "Policy Saved Successfully", "success");
-
-                // Reload data from backend to ensure table is always in sync
                 await fetchPolicies();
-
-                // Reset form
                 handleReset();
             } else {
                 showToast(response.data?.message || "Failed to save policy", "error");
@@ -491,7 +823,122 @@ export default function LeaveMispunchPolicyPage() {
                 showToast("Error occurred while saving policy. Please try again.", "error");
             }
         } finally {
-            setIsSubmitting(false);
+            setIsSaving(false);
+        }
+    };
+
+    // -----------------------------------------------------------
+    // Update Handler (Update Existing Policy)
+    // -----------------------------------------------------------
+    const handleUpdate = async () => {
+        const isLeave = policyType === "Leave";
+        const fixedLeaveCode = isLeave && formData.Misc_Abbr && LEAVE_TYPE_MAP[formData.Misc_Abbr]
+            ? LEAVE_TYPE_MAP[formData.Misc_Abbr].code
+            : (editingMiscCode ? Number(editingMiscCode) : undefined);
+
+        if (!editingMiscCode && !fixedLeaveCode) {
+            showToast("Please select a Leave Type or double-click any row in the table to update", "warning");
+            return;
+        }
+
+        if (!isPolicyInTable) {
+            showToast("This policy does not exist in the table yet. Please click Save instead.", "warning");
+            return;
+        }
+
+        if (typeof user?.branch === "string" || user?.branch?.toString().includes(",")) {
+            Swal.fire({
+                icon: "warning",
+                title: "Not Allowed",
+                text: "Multi branch not allowed to update entry",
+            });
+            return;
+        }
+
+        if (!validateForm()) {
+            showToast("Please fix the errors in the form before submitting", "warning");
+            return;
+        }
+
+        setIsUpdating(true);
+
+        try {
+            // If editingUtd is missing, try to resolve from existing policy in policyList
+            let targetUtd = editingUtd;
+            if (!targetUtd && fixedLeaveCode) {
+                const matchedPolicy = policyList.find(
+                    (p) =>
+                        (Number(p.Misc_Code) === fixedLeaveCode || String(p.Misc_Abbr || "").toUpperCase() === String(formData.Misc_Abbr || "").toUpperCase()) &&
+                        p.policyType === "Leave"
+                );
+                if (matchedPolicy?.UTD) {
+                    targetUtd = matchedPolicy.UTD;
+                }
+            }
+
+            const payload: Record<string, any> = {
+                Misc_Code: fixedLeaveCode,
+                Misc_Name: formData.Misc_Name.trim().toUpperCase(),
+                Misc_Abbr: formData.Misc_Abbr ? formData.Misc_Abbr.trim() : (isLeave ? "CL" : ""),
+                Misc_Dtl1: formData.Misc_Dtl1 || "Actual",
+                Misc_Dtl2: formData.Misc_Dtl2 || "Actual",
+                Misc_Dtl3: isLeave ? String(formData.Misc_Dtl3 || "0") : "0",
+                Misc_Num1: formData.Misc_Num1 !== "" && formData.Misc_Num1 !== null ? Number(formData.Misc_Num1) : 0,
+                Misc_Num2: formData.Misc_Num2 !== "" && formData.Misc_Num2 !== null ? Number(formData.Misc_Num2) : 0,
+                Loc_Code: Number(formData.Loc_Code || user?.branch || branchOptions[0]?.value || 0),
+                App_Type: formData.Policy_type || "USER & HR",
+                dis_back_date: formData.dis_back_date === "1" ? 1 : null,
+                CC_Group: formData.CC_Group !== "" ? Number(formData.CC_Group) : 0,
+                CC_Ledg: formData.CC_Ledg !== "" ? Number(formData.CC_Ledg) : 0,
+            };
+
+            if (targetUtd) {
+                payload.UTD = Number(targetUtd);
+            }
+
+            if (isLeave) {
+                payload.Assessable_Column = Number(formData.Assessable_Column);
+                payload.CC_Group = formData.CC_Group !== "" ? Number(formData.CC_Group) : 0;
+                payload.CC_Ledg = formData.CC_Ledg !== "" ? Number(formData.CC_Ledg) : 0;
+                payload.MIN_VALUE = formData.MIN_VALUE === "1" ? 1 : null;
+                payload.Continuous_Max = formData.Continuous_Max !== "" ? Number(formData.Continuous_Max) : 0;
+                payload.is_carry = formData.is_carry === "1" ? 1 : null;
+            } else {
+                payload.Assessable_Column = null;
+            }
+
+            const response = await axios.post(
+                `${process.env.NEXT_PUBLIC_URL}/DefaultMaster/updateLeaveMispunchPolicy`,
+                payload,
+                {
+                    headers: {
+                        compcode: user?.Comp_Code,
+                        name: user?.name,
+                    },
+                }
+            );
+
+            if (response.data?.success) {
+                showToast(response.data.message || "Policy Updated Successfully", "success");
+                await fetchPolicies();
+                handleReset();
+            } else {
+                showToast(response.data?.message || "Failed to update policy", "error");
+            }
+        } catch (error: any) {
+            console.error("API error while updating policy:", error);
+            if (error?.response?.status === 409) {
+                showToast(
+                    error.response.data?.message || "Another Leave/Mispunch Policy with this name already exists in this location",
+                    "warning"
+                );
+            } else if (error?.response?.data?.message) {
+                showToast(error.response.data.message, "error");
+            } else {
+                showToast("Error occurred while updating policy. Please try again.", "error");
+            }
+        } finally {
+            setIsUpdating(false);
         }
     };
 
@@ -499,136 +946,235 @@ export default function LeaveMispunchPolicyPage() {
     // Reset Form
     // -----------------------------------------------------------
     const handleReset = () => {
+        setEditingMiscCode(null);
+        setEditingUtd(null);
         setFormData({
-            Misc_Name: policyType === "Leave" ? "CASUAL LEAVE" : "MISPUNCH",
-            Misc_Abbr: "ACTIVE",
-            Misc_Dtl1: "Actual",
-            Misc_Dtl2: "Actual",
-            Misc_Dtl3: policyType === "Leave" ? "1" : "0",
-            Misc_Num1: "0",
-            Misc_Num2: "0",
+            Misc_Name: "",
+            Misc_Abbr: "",
+            Misc_Dtl1: "",
+            Misc_Dtl2: "",
+            Misc_Dtl3: "",
+            Misc_Num1: "",
+            Misc_Num2: "",
             Loc_Code: user?.branch ? String(user.branch) : (branchOptions[0]?.value || ""),
-            CC_Group: "0",
-            CC_Ledg: "0",
-            Assessable_Column: policyType === "Leave" ? "1" : "",
-            MIN_VALUE: "0",
-            Continuous_Max: policyType === "Leave" ? "3" : "0",
-            is_carry: "0",
-            dis_back_date: "null",
-            App_Type: "Mobile App",
+            CC_Group: "",
+            CC_Ledg: "",
+            Assessable_Column: "",
+            MIN_VALUE: "",
+            Continuous_Max: "",
+            is_carry: "",
+            dis_back_date: "",
+            Policy_type: "",
         });
         setValidationErrors({});
     };
 
     // -----------------------------------------------------------
-    // Impact Chart Metrics Calculation
+    // Deactivate Policy Handler (Sets Export_Type = 33)
     // -----------------------------------------------------------
-    const chartMetricsData = useMemo(() => {
-        if (policyType === "Leave") {
-            return [
+    const handleDeactivate = async (rowData: any) => {
+        const result = await Swal.fire({
+            title: "Deactivate Policy?",
+            text: `Are you sure you want to deactivate "${rowData.Misc_Name}"?`,
+            icon: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#ef4444",
+            cancelButtonColor: "#64748b",
+            confirmButtonText: "Yes, Deactivate",
+            cancelButtonText: "Cancel",
+        });
+
+        if (!result.isConfirmed) return;
+
+        try {
+            const isLeave = rowData.policyType === "Leave";
+            const payload: Record<string, any> = {
+                Misc_Code: Number(rowData.Misc_Code),
+                Misc_Name: String(rowData.Misc_Name).trim().toUpperCase(),
+                Misc_Abbr: rowData.Misc_Abbr || "INACTIVE",
+                Misc_Dtl1: rowData.Misc_Dtl1 === "-" ? "Actual" : (rowData.Misc_Dtl1 || "Actual"),
+                Misc_Dtl2: rowData.Misc_Dtl2 === "-" ? "Actual" : (rowData.Misc_Dtl2 || "Actual"),
+                Misc_Dtl3: isLeave ? String(rowData.Misc_Dtl3 === "-" ? "0" : (rowData.Misc_Dtl3 ?? "0")) : "0",
+                Misc_Num1: rowData.rawMiscNum1 !== "" && rowData.rawMiscNum1 !== null ? Number(rowData.rawMiscNum1) : 0,
+                Misc_Num2: rowData.rawMiscNum2 !== "" && rowData.rawMiscNum2 !== null ? Number(rowData.rawMiscNum2) : 0,
+                Loc_Code: Number(rowData.Loc_Code),
+                App_Type: "Deactive", // Backend sets Export_Type = 33
+                dis_back_date: rowData.rawBackDate === "1" ? 1 : null,
+            };
+
+            if (rowData.UTD) {
+                payload.UTD = Number(rowData.UTD);
+            }
+
+            if (isLeave) {
+                payload.Assessable_Column = rowData.rawAssessable ? Number(rowData.rawAssessable) : null;
+                payload.CC_Group = rowData.CC_Group !== "-" && rowData.CC_Group !== "" ? Number(rowData.CC_Group) : 0;
+                payload.CC_Ledg = rowData.CC_Ledg !== "-" && rowData.CC_Ledg !== "" ? Number(rowData.CC_Ledg) : 0;
+                payload.MIN_VALUE = rowData.MIN_VALUE !== "-" && rowData.MIN_VALUE !== "" ? Number(rowData.MIN_VALUE) : 0;
+                payload.Continuous_Max = rowData.Continuous_Max !== "-" && rowData.Continuous_Max !== "" ? Number(rowData.Continuous_Max) : 0;
+                payload.is_carry = rowData.rawCarry === "1" ? 1 : null;
+            } else {
+                payload.Assessable_Column = null;
+            }
+
+            const response = await axios.post(
+                `${process.env.NEXT_PUBLIC_URL}/DefaultMaster/updateLeaveMispunchPolicy`,
+                payload,
                 {
-                    loc_code: "Leave Val",
-                    chart_data: Math.max(0, parseFloat(formData.Misc_Dtl3) || 1),
-                },
-                {
-                    loc_code: "In-Time Mode",
-                    chart_data: Number(formData.Misc_Num1) || 0,
-                },
-                {
-                    loc_code: "Out-Time Mode",
-                    chart_data: Number(formData.Misc_Num2) || 0,
-                },
-                {
-                    loc_code: "Min Bal Req",
-                    chart_data: Math.max(0, parseFloat(formData.MIN_VALUE) || 0),
-                },
-                {
-                    loc_code: "Max Days",
-                    chart_data: Math.max(0, parseFloat(formData.Continuous_Max) || 0),
-                },
-                {
-                    loc_code: "Days Front",
-                    chart_data: Math.max(0, parseFloat(formData.CC_Group) || 0),
-                },
-                {
-                    loc_code: "Days Back",
-                    chart_data: Math.max(0, parseFloat(formData.CC_Ledg) || 0),
-                },
-                {
-                    loc_code: "Carry Fwd",
-                    chart_data: formData.is_carry === "1" ? 1 : 0,
-                },
-            ];
-        } else {
-            return [
-                {
-                    loc_code: "Leave Weight",
-                    chart_data: parseFloat(formData.Misc_Dtl3) || 0,
-                },
-                {
-                    loc_code: "In-Time Mode",
-                    chart_data: Number(formData.Misc_Num1) || 0,
-                },
-                {
-                    loc_code: "Out-Time Mode",
-                    chart_data: Number(formData.Misc_Num2) || 0,
-                },
-                {
-                    loc_code: "Backdate Lock",
-                    chart_data: formData.dis_back_date === "1" ? 1 : 0,
-                },
-                {
-                    loc_code: "App Export",
-                    chart_data: formData.App_Type === "Mobile App" ? 1 : 2,
-                },
-            ];
+                    headers: {
+                        compcode: user?.Comp_Code,
+                        name: user?.name,
+                    },
+                }
+            );
+
+            if (response.data?.success) {
+                showToast(response.data.message || "Policy Deactivated Successfully", "success");
+                setEditingMiscCode(null);
+                setEditingUtd(null);
+                await fetchPolicies();
+            } else {
+                showToast(response.data?.message || "Failed to deactivate policy", "error");
+            }
+        } catch (error: any) {
+            console.error("API error while deactivating policy:", error);
+            showToast(error?.response?.data?.message || "Error occurred while deactivating policy", "error");
         }
-    }, [formData, policyType]);
+    };
 
     // -----------------------------------------------------------
-    // Table Columns Definition
+    // Table Columns Definition (Leave vs Mispunch)
     // -----------------------------------------------------------
-    const tableColumns = useMemo(
-        () => [
+    const tableColumns = useMemo(() => {
+        const actionColumn = {
+            Header: "Action",
+            accessor: "action",
+            HeaderAlign: "center",
+            cellAlign: "center",
+            disableSortBy: true,
+            disableFilters: true,
+            Cell: ({ row }: any) => (
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeactivate(row.original);
+                    }}
+                    style={{
+                        backgroundColor: "#dc2626",
+                        color: "#ffffff",
+                        padding: "3px 10px",
+                        borderRadius: "4px",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        border: "1px solid #b91c1c",
+                        cursor: "pointer",
+                        display: "inline-block",
+                        lineHeight: "1.2",
+                        whiteSpace: "nowrap",
+                    }}
+                    className="hover:bg-red-700 active:scale-95 transition-all shadow-sm"
+                    title="Deactivate Policy"
+                >
+                    Deactivate
+                </button>
+            ),
+        };
+
+        if (policyType === "Mispunch") {
+            return [
+                {
+                    Header: "Sr No",
+                    accessor: "srno",
+                    Cell: ({ row }: any) => <span>{row.index + 1}</span>,
+                },
+                {
+                    Header: "Type",
+                    accessor: "policyType",
+                    Cell: ({ value }: any) => (
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                            {value}
+                        </span>
+                    ),
+                },
+                {
+                    Header: "Mispunch Reason",
+                    accessor: "Misc_Name",
+                },
+                {
+                    Header: "Status",
+                    accessor: "Misc_Abbr",
+                    Cell: ({ value }: any) => (
+                        <span
+                            className={`px-2 py-0.5 rounded text-xs font-semibold ${value === "ACTIVE"
+                                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                }`}
+                        >
+                            {value}
+                        </span>
+                    ),
+                },
+                {
+                    Header: "Present Value",
+                    accessor: "Misc_Dtl1",
+                },
+                {
+                    Header: "Absent Value",
+                    accessor: "Misc_Dtl2",
+                },
+                {
+                    Header: "Monthly Limit",
+                    accessor: "Misc_Num1",
+                },
+                {
+                    Header: "Days Front",
+                    accessor: "CC_Group",
+                },
+                {
+                    Header: "Days Back",
+                    accessor: "CC_Ledg",
+                },
+                {
+                    Header: "Back Date Rule",
+                    accessor: "dis_back_date",
+                },
+                {
+                    Header: "App Type",
+                    accessor: "Policy_type",
+                },
+                actionColumn,
+            ];
+        }
+
+        // Leave Columns
+        return [
             {
                 Header: "Sr No",
-                accessor: "Misc_Code",
+                accessor: "srno",
+                Cell: ({ row }: any) => <span>{row.index + 1}</span>,
             },
             {
                 Header: "Type",
                 accessor: "policyType",
                 Cell: ({ value }: any) => (
-                    <span
-                        className={`px-2 py-0.5 rounded text-xs font-semibold ${value === "Leave"
-                                ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
-                            }`}
-                    >
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
                         {value}
                     </span>
                 ),
             },
             {
-                Header: "Policy / Reason Name",
+                Header: "Leave Name",
                 accessor: "Misc_Name",
             },
             {
-                Header: "Status",
+                Header: "Leave Type",
                 accessor: "Misc_Abbr",
                 Cell: ({ value }: any) => (
-                    <span
-                        className={`px-2 py-0.5 rounded text-xs font-semibold ${value === "ACTIVE"
-                                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                            }`}
-                    >
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
                         {value}
                     </span>
                 ),
-            },
-            {
-                Header: "Location",
-                accessor: "Loc_Name",
             },
             {
                 Header: "Present Value",
@@ -639,15 +1185,15 @@ export default function LeaveMispunchPolicyPage() {
                 accessor: "Misc_Dtl2",
             },
             {
-                Header: "Leave Value",
+                Header: "Leave Value (ERP)",
                 accessor: "Misc_Dtl3",
             },
             {
-                Header: "In Time",
+                Header: "Monthly Leave Limit",
                 accessor: "Misc_Num1",
             },
             {
-                Header: "Out Time",
+                Header: "Leave Value (Cloud)",
                 accessor: "Misc_Num2",
             },
             {
@@ -663,11 +1209,11 @@ export default function LeaveMispunchPolicyPage() {
                 accessor: "CC_Ledg",
             },
             {
-                Header: "Min Bal Req",
+                Header: "Minimum Value",
                 accessor: "MIN_VALUE",
             },
             {
-                Header: "Max Continuous",
+                Header: "Max Count",
                 accessor: "Continuous_Max",
             },
             {
@@ -680,526 +1226,802 @@ export default function LeaveMispunchPolicyPage() {
             },
             {
                 Header: "App Type",
-                accessor: "App_Type",
+                accessor: "Policy_type",
             },
-        ],
-        []
+            actionColumn,
+        ];
+    }, [policyType, handleDeactivate]);
+
+    const downloadColumns = useMemo(
+        () => tableColumns.filter((col: any) => col.accessor !== "action" && col.Header !== "Action"),
+        [tableColumns]
     );
 
+    const displayedPolicies = useMemo(() => {
+        return policyList
+            .filter((p) => p.policyType === policyType)
+            .map((p, idx) => ({
+                ...p,
+                srno: idx + 1,
+            }));
+    }, [policyList, policyType]);
+
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-6 transition-colors">
+        <div ref={topRef} id="hr-master-top" className="min-h-screen bg-slate-50 dark:bg-slate-950 p-3 sm:p-4 md:p-6 transition-colors">
             {/* ── Page Header ───────────────────────────────────────── */}
-            <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+            <div className="mb-4 sm:mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 sm:gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
                 <div>
-                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                         <span>HR Master</span>
                         <span>&rarr;</span>
                         <span className="text-primary font-bold">Leave & Mispunch Policy</span>
                     </div>
-                    <h1 className="text-2xl font-bold text-[#193A69] dark:text-[#E2E8F0] flex items-center gap-2 mt-1">
-                        <ShieldCheck className="h-6 w-6 text-primary" />
-                        Leave & Mispunch Policy Master
+                    <h1 className="text-xl sm:text-2xl font-bold text-[#193A69] dark:text-[#E2E8F0] flex items-center gap-2 mt-1">
+                        <ShieldCheck className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
+                        <span>Leave & Mispunch Policy Master</span>
                     </h1>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        Configure Mispunch reasons, Leave policies, punch timing rules, and mobile/web access criteria.
+                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Configure Mispunch reasons, Leave policies and punch timing rules.
                     </p>
                 </div>
 
-                {/* Policy Type Selector Switch */}
-                <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1.5 rounded-lg shadow-sm">
-                    <span className="text-xs font-bold text-[#193A69] dark:text-slate-300 ml-2">
-                        Active Mode:
-                    </span>
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    {/* Policy Type Selector Switch */}
+                    <div className="flex items-center gap-2 bg-[#f1f5f9] dark:bg-[#0f172a] border border-[#cbd5e1] dark:border-[#334155] p-1 rounded-lg w-full sm:w-auto justify-between sm:justify-start shadow-sm">
+                        <span className="text-xs font-bold text-[#334155] dark:text-[#38bdf8] shrink-0 px-1.5">
+                            Active Mode:
+                        </span>
+                        <div className="flex items-center gap-1.5 flex-1 sm:flex-initial">
+                            <button
+                                type="button"
+                                onClick={() => handlePolicyTypeChange("policyType", "Leave")}
+                                className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-bold transition-all duration-150 whitespace-nowrap cursor-pointer select-none ${policyType === "Leave"
+                                    ? "bg-[#193A69] dark:bg-[#2563eb] text-white shadow-sm border border-[#193A69] dark:border-[#3b82f6]"
+                                    : "bg-white dark:bg-[#1e293b] text-[#334155] dark:text-[#cbd5e1] border border-[#cbd5e1] dark:border-[#334155] hover:bg-[#f8fafc] dark:hover:bg-[#334155]"
+                                    }`}
+                            >
+                                <CalendarCheck className="h-4 w-4 shrink-0" />
+                                <span>Leave</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handlePolicyTypeChange("policyType", "Mispunch")}
+                                className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-bold transition-all duration-150 whitespace-nowrap cursor-pointer select-none ${policyType === "Mispunch"
+                                    ? "bg-[#b45309] dark:bg-[#d97706] text-white shadow-sm border border-[#b45309] dark:border-[#f59e0b]"
+                                    : "bg-white dark:bg-[#1e293b] text-[#334155] dark:text-[#cbd5e1] border border-[#cbd5e1] dark:border-[#334155] hover:bg-[#f8fafc] dark:hover:bg-[#334155]"
+                                    }`}
+                            >
+                                <Clock className="h-4 w-4 shrink-0" />
+                                <span>Mispunch</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Question Mark (?) Help Guide Button */}
                     <button
                         type="button"
-                        onClick={() => handlePolicyTypeChange("policyType", "Leave")}
-                        className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${policyType === "Leave"
-                                ? "bg-primary text-white shadow"
-                                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                            }`}
+                        onClick={() => setIsHelpOpen(true)}
+                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs sm:text-sm font-bold rounded-lg border border-[#38bdf8] dark:border-[#0284c7] bg-[#f0f9ff] dark:bg-[#0c4a6e]/50 text-[#0369a1] dark:text-[#38bdf8] hover:bg-[#e0f2fe] dark:hover:bg-[#075985] transition-all shadow-sm cursor-pointer whitespace-nowrap select-none ml-auto sm:ml-0"
+                        title="Click to view explanation for all fields"
                     >
-                        <CalendarCheck className="h-3.5 w-3.5" />
-                        Leave Policy
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => handlePolicyTypeChange("policyType", "Mispunch")}
-                        className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${policyType === "Mispunch"
-                                ? "bg-amber-600 text-white shadow"
-                                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                            }`}
-                    >
-                        <Clock className="h-3.5 w-3.5" />
-                        Mispunch Policy
+                        <HelpCircle className="h-4 w-4 text-[#0284c7] dark:text-[#38bdf8] shrink-0" />
+                        <span>Guide (?)</span>
                     </button>
                 </div>
             </div>
 
-            {/* ── Main Content Grid (Form + Impact Chart) ───────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Left Column: Form (7 cols) */}
-                <div className="lg:col-span-7 space-y-6">
-                    <div className="bg-white dark:bg-[#15203F] border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
-                        {/* Top Section: Master Selection */}
-                        <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-5">
-                            <div className="flex items-center gap-2 text-[#193A69] dark:text-sky-400 font-bold text-sm mb-3">
-                                <Layers className="h-4 w-4" />
-                                <span>1. Core Policy Setup</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <Eselect
-                                        title="Policy Type"
-                                        name="policyType"
-                                        option={POLICY_TYPE_OPTIONS}
-                                        handleInputChange={handlePolicyTypeChange}
-                                        initialValue={policyType}
-                                        redlabel="*"
-                                    />
-                                </div>
-                                <div>
-                                    <Eselect
-                                        title="Status"
-                                        name="Misc_Abbr"
-                                        option={STATUS_OPTIONS}
-                                        handleInputChange={handleInputChange}
-                                        initialValue={formData.Misc_Abbr}
-                                        redlabel="*"
-                                    />
-                                    {validationErrors.Misc_Abbr && (
-                                        <p className="text-red-500 text-xs mt-1">{validationErrors.Misc_Abbr}</p>
-                                    )}
-                                </div>
+            {/* ── Main Content: Form ───────────────────────────────── */}
+            <div className="bg-white dark:bg-[#15203F] border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 sm:p-5 shadow-sm">
+                {/* Section 1: Core Policy Setup */}
+                <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-4 sm:mb-5">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2 text-slate-800 dark:text-sky-300 font-bold text-xs sm:text-sm">
+                            <Layers className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                            <span>1. Policy Category & Type Selection</span>
+                            <button
+                                type="button"
+                                onClick={() => setIsHelpOpen(true)}
+                                className="inline-flex items-center justify-center p-1 text-sky-600 hover:text-sky-800 dark:text-sky-400 dark:hover:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/50 rounded-full transition-colors cursor-pointer bg-transparent border-0"
+                                title="Click to view detailed explanation of all fields"
+                            >
+                                <HelpCircle className="h-4 w-4" />
+                            </button>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div>
+                            <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                Policy Type <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Select who can access this policy: User & HR or HR only)</span>
+                                <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                            </label>
+                            <div className="[&_label]:hidden">
+                                <SelectSearch
+                                    title="Policy Type"
+                                    name="policyType"
+                                    options={POLICY_TYPE_OPTIONS}
+                                    handleInputChange={handlePolicyTypeChange}
+                                    selectedValue={policyType}
+                                    redlabel="*"
+                                />
                             </div>
                         </div>
 
-                        {/* Section 2: Policy Identity & Location */}
-                        <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-5">
-                            <div className="flex items-center gap-2 text-[#193A69] dark:text-sky-400 font-bold text-sm mb-3">
-                                <Settings className="h-4 w-4" />
-                                <span>2. Reason Name & Branch</span>
+                        {policyType === "Leave" && (
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Leave Type <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Select leave type like CL, PL, SL)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Leave Type"
+                                        name="Misc_Abbr"
+                                        options={LEAVE_TYPE_OPTIONS}
+                                        handleInputChange={handleLeaveTypeChange}
+                                        selectedValue={formData.Misc_Abbr}
+                                        redlabel="*"
+                                    />
+                                </div>
+                                {validationErrors.Misc_Abbr && (
+                                    <p className="text-exit text-xs mt-1">{validationErrors.Misc_Abbr}</p>
+                                )}
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
+                        )}
+
+                        {policyType === "Mispunch" && (
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Status <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Enter code like MP, TR, TO)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
                                     <Ainput
-                                        title={policyType === "Leave" ? "Leave Name / Policy Name" : "Mispunch Reason"}
-                                        name="Misc_Name"
+                                        title="Status"
+                                        name="Misc_Abbr"
                                         type="text"
-                                        value={formData.Misc_Name}
+                                        value={formData.Misc_Abbr}
                                         handleInputChange={handleInputChange}
-                                        onInput={(_name, val) => handleInputChange("Misc_Name", val)}
+                                        onInput={(_name, val) => handleInputChange("Misc_Abbr", val)}
                                         disabled={false}
                                         required={true}
                                         redlabel="*"
-                                        placeholder={policyType === "Leave" ? "e.g. CASUAL LEAVE" : "e.g. MISPUNCH"}
-                                        errorMessage={validationErrors.Misc_Name}
+                                        placeholder="e.g. MP, TR, TO"
+                                        errorMessage={validationErrors.Misc_Abbr}
                                     />
                                 </div>
-                              
                             </div>
+                        )}
+                    </div>
+                </div>
 
-                            {/* Present / Absent / Leave Value Dropdowns using Eselect */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+                {/* Section 2: Policy Name & Values */}
+                <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-4 sm:mb-5">
+                    <div className="flex items-center gap-2 text-slate-800 dark:text-sky-300 font-bold text-xs sm:text-sm mb-3">
+                        <Settings className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                        <span>2. Policy Name & Attendance Credit Values</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div className={policyType === "Leave" ? "" : "sm:col-span-2"}>
+                            {policyType === "Leave" ? (
                                 <div>
-                                    <Eselect
-                                        title="Present Value"
-                                        name="Misc_Dtl1"
-                                        option={PresentValueOptions}
-                                        handleInputChange={handleInputChange}
-                                        initialValue={formData.Misc_Dtl1}
-                                    />
+                                    <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                        Leave Name <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Enter full name like Casual Leave, Sick Leave)</span>
+                                        <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                    </label>
+                                    <div className="[&_label]:hidden">
+                                        <Ainput
+                                            title="Leave Name"
+                                            name="Misc_Name"
+                                            type="text"
+                                            value={formData.Misc_Name}
+                                            handleInputChange={handleInputChange}
+                                            onInput={(_name, val) => handleInputChange("Misc_Name", val)}
+                                            disabled={false}
+                                            required={true}
+                                            redlabel="*"
+                                            placeholder="e.g. CASUAL LEAVE"
+                                            errorMessage={validationErrors.Misc_Name}
+                                        />
+                                    </div>
                                 </div>
+                            ) : (
                                 <div>
-                                    <Eselect
-                                        title="Absent Value"
-                                        name="Misc_Dtl2"
-                                        option={AbsentValueOptions}
-                                        handleInputChange={handleInputChange}
-                                        initialValue={formData.Misc_Dtl2}
-                                    />
+                                    <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                        Mispunch Reason <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Enter reason like Traffic Delay, Machine Issue)</span>
+                                        <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                    </label>
+                                    <div className="[&_label]:hidden">
+                                        <Ainput
+                                            title="Mispunch Reason"
+                                            name="Misc_Name"
+                                            type="text"
+                                            value={formData.Misc_Name}
+                                            handleInputChange={handleInputChange}
+                                            onInput={(_name, val) => handleInputChange("Misc_Name", val)}
+                                            disabled={false}
+                                            required={true}
+                                            redlabel="*"
+                                            placeholder="e.g. MISPUNCH - TRAFFIC DELAY"
+                                            errorMessage={validationErrors.Misc_Name}
+                                        />
+                                    </div>
                                 </div>
-                                <div>
-                                    <Eselect
-                                        title="Leave Value"
-                                        name="Misc_Dtl3"
-                                        option={LeaveValueOptions}
-                                        handleInputChange={handleInputChange}
-                                        initialValue={formData.Misc_Dtl3}
-                                        redlabel={policyType === "Leave" ? "*" : ""}
-                                    />
-                                    {validationErrors.Misc_Dtl3 && (
-                                        <p className="text-red-500 text-xs mt-1">{validationErrors.Misc_Dtl3}</p>
-                                    )}
-                                </div>
-                            </div>
+                            )}
                         </div>
 
-                        {/* Section 3: In Time & Out Time using Eselect */}
-                        <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-5 bg-slate-50/70 dark:bg-slate-900/40 p-3.5 rounded-lg">
-                            <div className="flex items-center gap-2 text-[#193A69] dark:text-sky-400 font-bold text-sm mb-3">
-                                <Timer className="h-4 w-4" />
-                                <span>3. Punch Timing Rules</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <Eselect
-                                        title="In Time"
-                                        name="Misc_Num1"
-                                        option={InTimeOptions}
-                                        handleInputChange={handleInputChange}
-                                        initialValue={formData.Misc_Num1}
-                                    />
-                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                                        0 = Actual, 1 = Shift Time, 2 = Not Required
-                                    </p>
-                                </div>
-                                <div>
-                                    <Eselect
-                                        title="Out Time"
-                                        name="Misc_Num2"
-                                        option={InTimeOptions}
-                                        handleInputChange={handleInputChange}
-                                        initialValue={formData.Misc_Num2}
-                                    />
-                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                                        0 = Actual, 1 = Shift Time, 2 = Not Required
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Section 4: Conditional Leave Configuration Fields */}
                         {policyType === "Leave" && (
-                            <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-5 bg-blue-50/50 dark:bg-blue-950/20 p-3.5 rounded-lg">
-                                <div className="flex items-center gap-2 text-blue-700 dark:text-sky-300 font-bold text-sm mb-3">
-                                    <CalendarCheck className="h-4 w-4" />
-                                    <span>4. Leave Rules & Limits</span>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div>
-                                        <Eselect
-                                            title="Leave / Assessable Type"
-                                            name="Assessable_Column"
-                                            option={ASSESSABLE_TYPE_OPTIONS}
-                                            handleInputChange={handleAssessableTypeChange}
-                                            initialValue={formData.Assessable_Column}
-                                            redlabel="*"
-                                        />
-                                        {validationErrors.Assessable_Column && (
-                                            <p className="text-red-500 text-xs mt-1">{validationErrors.Assessable_Column}</p>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <Ainput
-                                            title="Minimum Bal Req."
-                                            name="MIN_VALUE"
-                                            type="number"
-                                            step="0.5"
-                                            value={formData.MIN_VALUE}
-                                            handleInputChange={handleInputChange}
-                                            onInput={(_name, val) => handleInputChange("MIN_VALUE", val)}
-                                            disabled={false}
-                                            required={true}
-                                            redlabel="*"
-                                            errorMessage={validationErrors.MIN_VALUE}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
-                                    <div>
-                                        <Ainput
-                                            title="Continuous Max Days"
-                                            name="Continuous_Max"
-                                            type="number"
-                                            step="1"
-                                            value={formData.Continuous_Max}
-                                            handleInputChange={handleInputChange}
-                                            onInput={(_name, val) => handleInputChange("Continuous_Max", val)}
-                                            disabled={false}
-                                            required={true}
-                                            redlabel="*"
-                                            errorMessage={validationErrors.Continuous_Max}
-                                        />
-                                    </div>
-                                    <div>
-                                        <Ainput
-                                            title="Days Front (CC_Group)"
-                                            name="CC_Group"
-                                            type="number"
-                                            step="1"
-                                            value={formData.CC_Group}
-                                            handleInputChange={handleInputChange}
-                                            onInput={(_name, val) => handleInputChange("CC_Group", val)}
-                                            disabled={false}
-                                            errorMessage={validationErrors.CC_Group}
-                                        />
-                                    </div>
-                                    <div>
-                                        <Ainput
-                                            title="Days Back (CC_Ledg)"
-                                            name="CC_Ledg"
-                                            type="number"
-                                            step="1"
-                                            value={formData.CC_Ledg}
-                                            handleInputChange={handleInputChange}
-                                            onInput={(_name, val) => handleInputChange("CC_Ledg", val)}
-                                            disabled={false}
-                                            errorMessage={validationErrors.CC_Ledg}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                                    <div>
-                                        <Eselect
-                                            title="Carry Forward"
-                                            name="is_carry"
-                                            option={CARRY_FORWARD_OPTIONS}
-                                            handleInputChange={handleInputChange}
-                                            initialValue={formData.is_carry}
-                                            redlabel="*"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Eselect
-                                            title="Back Date Rule"
-                                            name="dis_back_date"
-                                            option={BACK_DATE_OPTIONS}
-                                            handleInputChange={handleInputChange}
-                                            initialValue={formData.dis_back_date}
-                                            redlabel="*"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Section 4 (Mispunch Mode): Specific Mispunch Rules */}
-                        {policyType === "Mispunch" && (
-                            <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-5 bg-amber-50/50 dark:bg-amber-950/20 p-3.5 rounded-lg">
-                                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 font-bold text-sm mb-3">
-                                    <Clock className="h-4 w-4" />
-                                    <span>4. Mispunch Policy Constraints</span>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div>
-                                        <Eselect
-                                            title="Back Date Rule"
-                                            name="dis_back_date"
-                                            option={BACK_DATE_OPTIONS}
-                                            handleInputChange={handleInputChange}
-                                            initialValue={formData.dis_back_date}
-                                            redlabel="*"
-                                        />
-                                    </div>
-                                    <div className="flex flex-col justify-center bg-white dark:bg-slate-900 border border-dashed border-amber-300 dark:border-amber-800 p-3 rounded-md">
-                                        <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">
-                                            Assessable Column:
-                                        </span>
-                                        <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                                            Automatically handled as <strong>NULL</strong> for Mispunch.
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Section 5: Application Platform Type */}
-                        <div className="mb-6">
-                            <div className="flex items-center gap-2 text-[#193A69] dark:text-sky-400 font-bold text-sm mb-3">
-                                <ShieldCheck className="h-4 w-4" />
-                                <span>5. Application Access Target</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <Eselect
-                                        title="Application Type"
-                                        name="App_Type"
-                                        option={APP_TYPE_OPTIONS}
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Leave Value (ERP) <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Deducts leave from balance: 1.0 = Full Day, 0.5 = Half Day)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Leave Value (ERP)"
+                                        name="Misc_Dtl3"
+                                        options={LeaveValueOptions}
                                         handleInputChange={handleInputChange}
-                                        initialValue={formData.App_Type}
+                                        selectedValue={formData.Misc_Dtl3}
                                         redlabel="*"
                                     />
-                                    {validationErrors.App_Type && (
-                                        <p className="text-red-500 text-xs mt-1">{validationErrors.App_Type}</p>
-                                    )}
                                 </div>
-                                <div className="flex items-center bg-slate-50 dark:bg-slate-900/60 p-3 rounded-md border border-slate-200 dark:border-slate-800">
-                                    <span className="text-xs text-slate-600 dark:text-slate-300">
-                                        Backend will automatically assign{" "}
-                                        <strong>{formData.App_Type === "Mobile App" ? "Export_Type = 1" : "Export_Type = 2"}</strong>{" "}
-                                        and generate <strong>Misc_Code</strong> under <strong>Misc_Type 92</strong>.
-                                    </span>
-                                </div>
+                                {validationErrors.Misc_Dtl3 && (
+                                    <p className="text-exit text-xs mt-1">{validationErrors.Misc_Dtl3}</p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Present & Absent Value Dropdowns using SelectSearch (Full Width 2-Column Grid) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3 sm:mt-4">
+                        <div>
+                            <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                Present Value <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Gives attendance on approval: 1.0 = Full Day, 0.5 = Half Day, 0 = No Present)</span>
+                            </label>
+                            <div className="[&_label]:hidden">
+                                <SelectSearch
+                                    title="Present Value"
+                                    name="Misc_Dtl1"
+                                    options={PresentValueOptions}
+                                    handleInputChange={handleInputChange}
+                                    selectedValue={formData.Misc_Dtl1}
+                                />
                             </div>
                         </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
-                            <button
-                                type="button"
-                                onClick={handleReset}
-                                disabled={isSubmitting}
-                                className="px-5 py-2 text-xs font-bold uppercase rounded-md border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5"
-                            >
-                                <RefreshCw className="h-3.5 w-3.5" />
-                                Reset
-                            </button>
-
-                            <AButton
-                                text={isSubmitting ? "SAVING POLICY..." : "SAVE POLICY"}
-                                onClick={handleSubmit}
-                                type="button"
-                                color="primary"
-                            />
+                        <div>
+                            <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                Absent Value <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Marks employee as absent: 1.0 = Full Day, 0.5 = Half Day, 0 = Not Absent)</span>
+                            </label>
+                            <div className="[&_label]:hidden">
+                                <SelectSearch
+                                    title="Absent Value"
+                                    name="Misc_Dtl2"
+                                    options={AbsentValueOptions}
+                                    handleInputChange={handleInputChange}
+                                    selectedValue={formData.Misc_Dtl2}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Right Column: Dynamic Impact Chart & Policy Preview (5 cols) */}
-                <div className="lg:col-span-5 space-y-6">
-                    {/* ChartCard: Real-time Impact Visualization */}
-                    <div className="bg-white dark:bg-[#15203F] border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
-                        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-4">
-                            <div className="flex items-center gap-2">
-                                <BarChart3 className="h-5 w-5 text-primary" />
-                                <h3 className="font-bold text-sm text-[#193A69] dark:text-[#E2E8F0]">
-                                    Policy Configuration Metrics Impact
-                                </h3>
+                {/* Section 3: Monthly Limit & Cloud Leave Value */}
+                <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-4 sm:mb-5 bg-slate-50/70 dark:bg-slate-900/40 p-3 sm:p-3.5 rounded-lg">
+                    <div className="flex items-center gap-2 text-slate-800 dark:text-sky-300 font-bold text-xs sm:text-sm mb-3">
+                        <CalendarCheck className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                        <span>{policyType === "Leave" ? "3. Monthly Leave Limit & Cloud Leave Value" : "3. Monthly Limit"}</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div className={policyType === "Leave" ? "" : "sm:col-span-2"}>
+                            <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                {policyType === "Leave" ? "Monthly Leave Limit (count)" : "Monthly Mispunch Limit (count)"}{" "}
+                                <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">
+                                    ({policyType === "Leave" ? "How much leave take in Current month" : "How many times allowed in 1 month"})
+                                </span>
+                            </label>
+                            <div className="[&_label]:hidden">
+                                <Ainput
+                                    title="Monthly Leave Limit"
+                                    name="Misc_Num1"
+                                    type="number"
+                                    step="1"
+                                    value={formData.Misc_Num1}
+                                    handleInputChange={handleInputChange}
+                                    onInput={(_name, val) => handleInputChange("Misc_Num1", val)}
+                                    disabled={false}
+                                    placeholder="Max count per month"
+                                />
                             </div>
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300">
-                                {policyType} Mode
+                        </div>
+                        {policyType === "Leave" && (
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Leave Value (Cloud) <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Deducts leave from balance  1.0 = Full Day, 0.5 = Half Day)</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Leave Value (CLOUD)"
+                                        name="Misc_Num2"
+                                        options={LeaveValueOptions}
+                                        handleInputChange={handleInputChange}
+                                        selectedValue={formData.Misc_Num2}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Section 4: Conditional Leave Configuration Fields */}
+                {policyType === "Leave" && (
+                    <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-4 sm:mb-5 bg-blue-50/50 dark:bg-blue-950/20 p-3 sm:p-3.5 rounded-lg">
+                        <div className="flex items-center gap-2 text-blue-700 dark:text-sky-300 font-bold text-xs sm:text-sm mb-3">
+                            <CalendarCheck className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                            <span>4. Leave Quota Rules & Eligibility Constraints</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Leave / Assessable Type <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Salary type: Full Day Paid, Half Day Paid, or No Pay)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Leave / Assessable Type"
+                                        name="Assessable_Column"
+                                        options={ASSESSABLE_TYPE_OPTIONS}
+                                        handleInputChange={handleAssessableTypeChange}
+                                        selectedValue={formData.Assessable_Column}
+                                        redlabel="*"
+                                    />
+                                </div>
+                                {validationErrors.Assessable_Column && (
+                                    <p className="text-exit text-xs mt-1">{validationErrors.Assessable_Column}</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Minimum  Value. <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(its use for Half day leaves for ex:(1=only assessable for fullday leave,0.5=assessable for both))</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Minimum Value"
+                                        name="MIN_VALUE"
+                                        options={MIN_BALANCE_OPTIONS}
+                                        handleInputChange={handleInputChange}
+                                        selectedValue={formData.MIN_VALUE}
+                                        redlabel="*"
+                                    />
+                                </div>
+                                {validationErrors.MIN_VALUE && (
+                                    <p className="text-exit text-xs mt-1">{validationErrors.MIN_VALUE}</p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mt-3 sm:mt-4">
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Continuous Max Days <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Max number of leave days that can be taken together)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <Ainput
+                                        title="Continuous Max Days"
+                                        name="Continuous_Max"
+                                        type="number"
+                                        step="1"
+                                        value={formData.Continuous_Max}
+                                        handleInputChange={handleInputChange}
+                                        onInput={(_name, val) => handleInputChange("Continuous_Max", val)}
+                                        disabled={false}
+                                        required={true}
+                                        redlabel="*"
+                                        errorMessage={validationErrors.Continuous_Max}
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Days Front (CC_Group) <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Days in advance to apply for leave)</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <Ainput
+                                        title="Days Front (CC_Group)"
+                                        name="CC_Group"
+                                        type="number"
+                                        step="1"
+                                        value={formData.CC_Group}
+                                        handleInputChange={handleInputChange}
+                                        onInput={(_name, val) => handleInputChange("CC_Group", val)}
+                                        disabled={false}
+                                        errorMessage={validationErrors.CC_Group}
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Days Back (CC_Ledg) <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(How many past days an employee can apply for leave)</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <Ainput
+                                        title="Days Back (CC_Ledg)"
+                                        name="CC_Ledg"
+                                        type="number"
+                                        step="1"
+                                        value={formData.CC_Ledg}
+                                        handleInputChange={handleInputChange}
+                                        onInput={(_name, val) => handleInputChange("CC_Ledg", val)}
+                                        disabled={false}
+                                        errorMessage={validationErrors.CC_Ledg}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3 sm:mt-4">
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Carry Forward <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(1 = Add remaining leave to next month, NULL = Do not add)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Carry Forward"
+                                        name="is_carry"
+                                        options={CARRY_FORWARD_OPTIONS}
+                                        handleInputChange={handleInputChange}
+                                        selectedValue={formData.is_carry}
+                                        redlabel="*"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Back Date Rule <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Allow or Block applying for past dates)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Back Date Rule"
+                                        name="dis_back_date"
+                                        options={BACK_DATE_OPTIONS}
+                                        handleInputChange={handleInputChange}
+                                        selectedValue={formData.dis_back_date}
+                                        redlabel="*"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Section 4 (Mispunch Mode): Specific Mispunch Rules */}
+                {policyType === "Mispunch" && (
+                    <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-4 sm:mb-5 bg-amber-50/50 dark:bg-amber-950/20 p-3 sm:p-3.5 rounded-lg">
+                        <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-bold text-xs sm:text-sm mb-3">
+                            <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                            <span>4. Mispunch Policy Constraints</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Days Front (CC_Group) <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(How many days in advance employee can apply for mispunch)</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <Ainput
+                                        title="Days Front (CC_Group)"
+                                        name="CC_Group"
+                                        type="number"
+                                        step="1"
+                                        value={formData.CC_Group}
+                                        handleInputChange={handleInputChange}
+                                        onInput={(_name, val) => handleInputChange("CC_Group", val)}
+                                        disabled={false}
+                                        errorMessage={validationErrors.CC_Group}
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Days Back (CC_Ledg) <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(How many past days an employee can apply for mispunch after taking it)</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <Ainput
+                                        title="Days Back (CC_Ledg)"
+                                        name="CC_Ledg"
+                                        type="number"
+                                        step="1"
+                                        value={formData.CC_Ledg}
+                                        handleInputChange={handleInputChange}
+                                        onInput={(_name, val) => handleInputChange("CC_Ledg", val)}
+                                        disabled={false}
+                                        errorMessage={validationErrors.CC_Ledg}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3 sm:mt-4">
+                            <div>
+                                <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                    Back Date Rule <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Allow or Block mispunch for past dates)</span>
+                                    <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                                </label>
+                                <div className="[&_label]:hidden">
+                                    <SelectSearch
+                                        title="Back Date Rule"
+                                        name="dis_back_date"
+                                        options={BACK_DATE_OPTIONS}
+                                        handleInputChange={handleInputChange}
+                                        selectedValue={formData.dis_back_date}
+                                        redlabel="*"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex flex-col justify-center bg-amber-50/70 dark:bg-slate-900/60 border border-dashed border-amber-300 dark:border-amber-700/60 p-3 rounded-md">
+                                <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                    Assessable Column Rule:
+                                </span>
+                                <span className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                                    Salary assessment column is automatically handled as <strong className="text-slate-900 dark:text-white">NULL</strong> for Mispunch policies.
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Section 5: Application Access Target */}
+                <div className="mb-5 sm:mb-6">
+                    <div className="flex items-center gap-2 text-slate-800 dark:text-sky-300 font-bold text-xs sm:text-sm mb-3">
+                        <ShieldCheck className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                        <span>5. Policy Access Target (User vs. HR Portal)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div>
+                            <label className="flex items-center font-bold text-xs mt-1 mb-1 text-[#193A69] dark:text-[#E2E8F0]">
+                                Policy Type <span className="font-normal text-slate-500 dark:text-slate-400 ml-1">(Select who can access this policy: User & HR or HR only)</span>
+                                <span className="text-exit text-xs ml-1.5 font-bold">*</span>
+                            </label>
+                            <div className="[&_label]:hidden">
+                                <SelectSearch
+                                    title="Policy Type"
+                                    name="Policy_type"
+                                    options={APP_TYPE_OPTIONS}
+                                    handleInputChange={handleInputChange}
+                                    selectedValue={formData.Policy_type}
+                                    redlabel="*"
+                                />
+                            </div>
+                            {validationErrors.Policy_type && (
+                                <p className="text-exit text-xs mt-1">{validationErrors.Policy_type}</p>
+                            )}
+                        </div>
+                        <div className="flex items-center bg-slate-50/80 dark:bg-slate-900/60 p-3 rounded-md border border-slate-200 dark:border-slate-800">
+                            <span className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                                <strong className="text-slate-900 dark:text-white">USER & HR:</strong> Available for employees on Mobile App & Self-Service Portal.<br />
+                                <strong className="text-slate-900 dark:text-white">HR:</strong> Only accessable for  HR Admin Portal.
                             </span>
                         </div>
-
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                            Real-time parameter graph reflecting balance limits, notice days, timing rules, and policy weights.
-                        </p>
-
-                        <div className="rounded-lg overflow-hidden border border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/30 p-2">
-                            <ChartCard
-                                title={`${policyType} Parameter Weight & Limits`}
-                                data={chartMetricsData}
-                                height="h-56"
-                                type="column"
-                            />
-                        </div>
-
-                        {/* Impact Summary Pill Badges */}
-                        <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-2 text-xs">
-                            <div className="bg-slate-100 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                                <span className="text-slate-500 dark:text-slate-400 block font-medium">
-                                    {policyType === "Leave" ? "Assessable Column" : "Assessable Type"}
-                                </span>
-                                <span className="font-bold text-[#193A69] dark:text-sky-300 text-sm">
-                                    {policyType === "Leave"
-                                        ? ASSESSABLE_TYPE_OPTIONS.find((o) => o.value === formData.Assessable_Column)?.label?.split("→")[1]?.trim() || formData.Assessable_Column
-                                        : "NULL"}
-                                </span>
-                            </div>
-
-                            <div className="bg-slate-100 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                                <span className="text-slate-500 dark:text-slate-400 block font-medium">
-                                    In-Time / Out-Time
-                                </span>
-                                <span className="font-bold text-indigo-600 dark:text-indigo-400 text-sm">
-                                    {formData.Misc_Num1 === "0" ? "Actual" : formData.Misc_Num1 === "1" ? "Shift" : "None"} /{" "}
-                                    {formData.Misc_Num2 === "0" ? "Actual" : formData.Misc_Num2 === "1" ? "Shift" : "None"}
-                                </span>
-                            </div>
-
-                            <div className="bg-slate-100 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                                <span className="text-slate-500 dark:text-slate-400 block font-medium">
-                                    Target Application
-                                </span>
-                                <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                                    {formData.App_Type}
-                                </span>
-                            </div>
-
-                            <div className="bg-slate-100 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                                <span className="text-slate-500 dark:text-slate-400 block font-medium">
-                                    Back Date Rule
-                                </span>
-                                <span className="font-bold text-[#193A69] dark:text-slate-200 text-sm">
-                                    {formData.dis_back_date === "1" ? "Blocked (1)" : "Allowed (NULL)"}
-                                </span>
-                            </div>
-                        </div>
                     </div>
+                </div>
 
-                    {/* Quick Rules Checklist Card */}
-                    <div className="bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50 rounded-xl p-4 text-xs space-y-2">
-                        <h4 className="font-bold text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
-                            <CheckCircle2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                            Policy Engine Rules Validation
-                        </h4>
-                        <ul className="space-y-1.5 text-blue-800 dark:text-blue-300">
-                            <li className="flex items-start gap-1.5">
-                                <span className="text-blue-500 font-bold">•</span>
-                                <span>
-                                    <strong>In Time (Misc_Num1)</strong> & <strong>Out Time (Misc_Num2)</strong>: Actual (0), Shift Time (1), Not Required (2).
-                                </span>
-                            </li>
-                            <li className="flex items-start gap-1.5">
-                                <span className="text-blue-500 font-bold">•</span>
-                                <span>
-                                    <strong>Misc_Type 92</strong> is automatically managed by the backend engine for all policies.
-                                </span>
-                            </li>
-                            <li className="flex items-start gap-1.5">
-                                <span className="text-blue-500 font-bold">•</span>
-                                <span>
-                                    Double-click on any row in the table below to load and view policy parameters.
-                                </span>
-                            </li>
-                        </ul>
-                    </div>
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleReset}
+                        disabled={isSaving || isUpdating}
+                        className="w-full sm:w-auto px-4 sm:px-5 py-2 text-xs font-bold uppercase rounded-md border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        {editingMiscCode ? "Cancel Edit" : "Reset"}
+                    </Button>
+
+                    <Button
+                        type="button"
+                        variant="save"
+                        onClick={handleSave}
+                        disabled={isSaving || isUpdating}
+                        loading={isSaving}
+                        className="flex-1 sm:flex-initial bg-primary hover:bg-primary/90 text-white font-bold uppercase text-xs px-5 sm:px-6 py-2 shadow-sm rounded-md cursor-pointer"
+                    >
+                        Save
+                    </Button>
+
+                    <Button
+                        type="button"
+                        variant="update"
+                        onClick={handleUpdate}
+                        disabled={isSaving || isUpdating || !isPolicyInTable}
+                        loading={isUpdating}
+                        className="flex-1 sm:flex-initial bg-save hover:bg-save/90 text-white font-bold uppercase text-xs px-5 sm:px-6 py-2 shadow-sm rounded-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Update
+                    </Button>
                 </div>
             </div>
 
             {/* ── Table Section: ServiceTabel Component ──────────────── */}
-            <div className="mt-8 bg-white dark:bg-[#15203F] border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
+            <div className="mt-6 sm:mt-8 bg-white dark:bg-[#15203F] border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 sm:mb-4">
                     <div className="flex items-center gap-2">
-                        <Database className="h-5 w-5 text-primary" />
-                        <h3 className="font-bold text-base text-[#193A69] dark:text-[#E2E8F0]">
-                            Leave & Mispunch Policies Master List
+                        <Database className="h-5 w-5 text-primary shrink-0" />
+                        <h3 className="font-bold text-sm sm:text-base text-[#193A69] dark:text-[#E2E8F0]">
+                            {policyType === "Leave" ? "Leave Policies Master List" : "Mispunch Policies Master List"}
                         </h3>
                         {isLoadingTable && (
                             <span className="text-xs text-primary font-medium ml-2 animate-pulse">
-                                Loading policies...
+                                Loading...
                             </span>
                         )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-between sm:justify-end gap-3">
                         <span className="text-xs text-slate-500 dark:text-slate-400">
-                            Total Policies: {policyList.length}
+                            Total {policyType === "Leave" ? "Leave" : "Mispunch"} Policies: {displayedPolicies.length}
                         </span>
-                        <button
+                        <Button
                             type="button"
                             onClick={fetchPolicies}
                             disabled={isLoadingTable}
-                            className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
+                            className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors bg-transparent shadow-none h-auto cursor-pointer"
                             title="Refresh Policies"
                         >
                             <RefreshCw className={`h-4 w-4 ${isLoadingTable ? "animate-spin" : ""}`} />
-                        </button>
+                        </Button>
                     </div>
                 </div>
 
-                <ServiceTabel
-                    title="Leave & Mispunch Policies"
-                    columns={tableColumns}
-                    data={policyList}
-                    selectValue="id"
-                    onRowDoubleClick={handleRowDoubleClick}
-                    height="350px"
-                    size="text-xs"
-                />
+                <div className="w-full overflow-x-auto">
+                    <ServiceTabel
+                        title=""
+                        columns={tableColumns}
+                        columnsDownload={downloadColumns}
+                        data={displayedPolicies}
+                        selectValue="id"
+                        onRowDoubleClick={handleRowDoubleClick}
+                        height="350px"
+                        size="text-xs"
+                    />
+                </div>
             </div>
+
+            {/* ── Field Guide & Help Modal (?) ──────────────────────── */}
+            {isHelpOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-[#15203F] border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[90vh] sm:max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                            <div className="flex items-center gap-2 sm:gap-2.5">
+                                <div className="p-1.5 sm:p-2 rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 shrink-0">
+                                    <HelpCircle className="h-4 w-4 sm:h-5 sm:w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-sm sm:text-base text-slate-800 dark:text-sky-300">
+                                        Policy Fields & Rules Explanation Guide
+                                    </h3>
+                                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+                                        Simple explanation of every field and how it works
+                                    </p>
+                                </div>
+                            </div>
+                            <Button
+                                type="button"
+                                onClick={() => setIsHelpOpen(false)}
+                                className="p-1.5 sm:p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer bg-transparent shadow-none h-auto"
+                            >
+                                <X className="h-5 w-5" />
+                            </Button>
+                        </div>
+
+                        {/* Search Filter */}
+                        <div className="px-4 sm:px-6 py-2.5 sm:py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15203F]">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Search any field name (e.g. Assessable, Carry Forward, Min Bal)..."
+                                    value={helpSearch}
+                                    onChange={(e) => setHelpSearch(e.target.value)}
+                                    className="w-full pl-9 pr-9 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                />
+                                {helpSearch && (
+                                    <Button
+                                        type="button"
+                                        onClick={() => setHelpSearch("")}
+                                        className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full bg-transparent shadow-none h-auto cursor-pointer"
+                                        title="Clear search"
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Modal Body - Filtered Field Cards */}
+                        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 text-xs text-slate-700 dark:text-slate-300">
+                            {(() => {
+                                const q = helpSearch.trim().toLowerCase();
+                                const filteredSections = FIELD_GUIDE_SECTIONS.map((section) => {
+                                    const matchingItems = section.items.filter((item) => {
+                                        if (!q) return true;
+                                        return (
+                                            item.title.toLowerCase().includes(q) ||
+                                            item.keywords.toLowerCase().includes(q) ||
+                                            section.title.toLowerCase().includes(q)
+                                        );
+                                    });
+                                    return { ...section, items: matchingItems };
+                                }).filter((section) => section.items.length > 0);
+
+                                if (filteredSections.length === 0) {
+                                    return (
+                                        <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center">
+                                            <Search className="h-8 w-8 text-slate-400 mb-3" />
+                                            <h5 className="font-bold text-slate-700 dark:text-slate-200 text-sm">
+                                                No matching fields found
+                                            </h5>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
+                                                No field guide items matched <strong>"{helpSearch}"</strong>. Try searching for Assessable, Carry Forward, Min Bal, Present Value, etc.
+                                            </p>
+                                            <Button
+                                                type="button"
+                                                onClick={() => setHelpSearch("")}
+                                                className="mt-4 px-4 py-1.5 text-xs font-bold text-sky-600 dark:text-sky-400 border border-sky-300 dark:border-sky-700 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950 transition-colors bg-transparent shadow-none cursor-pointer"
+                                            >
+                                                Clear Search
+                                            </Button>
+                                        </div>
+                                    );
+                                }
+
+                                return filteredSections.map((section) => {
+                                    const IconComponent = section.icon;
+                                    return (
+                                        <div key={section.id} className="space-y-3">
+                                            <h4 className="font-bold text-sm text-slate-800 dark:text-sky-300 flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-1.5">
+                                                <IconComponent className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                                                <span>{section.title}</span>
+                                            </h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                {section.items.map((item, idx) => (
+                                                    <div
+                                                        key={idx}
+                                                        className={`p-3 sm:p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 ${item.colSpan ? "md:col-span-2 lg:col-span-3" : ""
+                                                            }`}
+                                                    >
+                                                        <span className="font-bold text-sky-700 dark:text-sky-300 block text-xs mb-1">
+                                                            • {item.title}
+                                                        </span>
+                                                        <div className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                                                            {item.content}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                });
+                            })()}
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="px-4 sm:px-6 py-3 sm:py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-end">
+                            <Button
+                                type="button"
+                                variant="save"
+                                onClick={() => setIsHelpOpen(false)}
+                                className="px-5 py-1.5 text-xs font-bold uppercase rounded-md shadow-sm cursor-pointer"
+                            >
+                                Got it
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -199,6 +199,21 @@ export const treeData = [
             url: "/autovyn/insurence-renewal/hr-master",
           },
 
+             {
+            title: "Edit Profile |",
+            key: "23.3.14",
+            url: "/autovyn/insurence-renewal/editprofile",
+          },
+                {
+            title: "Document Approval |",
+            key: "23.3.15",
+            url: "/autovyn/insurence-renewal/docapproval",
+          },
+         {
+            title: "Document Approval View |",
+            key: "23.3.16",
+            url: "/autovyn/insurence-renewal/docapproverview",
+          },
 
         ],
       },
