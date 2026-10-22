@@ -1,6 +1,6 @@
 
 "use client";
-import React, { useState, useRef, useEffect,useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   useTable,
   useGlobalFilter,
@@ -90,7 +90,7 @@ const DataTable = ({
   showRejectButton,
   columnsDownload,
   numericFilterColumns = [],
-} : DataTableProps) => {
+}: DataTableProps) => {
   const tableRef = useRef(null);
   const [columnFilters, setColumnFilters] = useState({});
   const [activeFilter, setActiveFilter] = useState(null);
@@ -115,7 +115,7 @@ const DataTable = ({
         const rowValue = row[key];
         const filterValue = value;
 
-        if (numericFilterColumns.includes(key) && !isNaN(filterValue )) {
+        if (numericFilterColumns.includes(key) && !isNaN(filterValue)) {
           const numRowValue = parseFloat(rowValue);
           const numFilterValue = parseFloat(filterValue);
 
@@ -139,7 +139,7 @@ const DataTable = ({
     {
       columns,
       data: filterPosition === "FilterData" ? filteredData : data, // ✅ use filteredData
-      initialState: { pageSize: 10},
+      initialState: { pageSize: 10 },
       globalFilter: globalFilterFunction,
     },
     useGlobalFilter,
@@ -156,7 +156,7 @@ const DataTable = ({
     page,
     state,
     setGlobalFilter,
-    rows, 
+    rows,
     nextPage,
     previousPage,
     canNextPage,
@@ -202,7 +202,7 @@ const DataTable = ({
 
     return Array.from(uniqueValues).sort();
   };
- 
+
   const onclickExceldownload = () => {
     const exportData = rows.map((row) => row.original);
     handleExcelDownload(columnsDownload || columns, exportData);
@@ -277,13 +277,13 @@ const DataTable = ({
     }
   };
 
-  const handleRowClickInternal = (rowId :any, rowData:any) => {
+  const handleRowClickInternal = (rowId: any, rowData: any) => {
     toggleRowSelection(rowId, rowData);
-    setisSelectedselect([{ id: rowId, rowData  }]);
+    setisSelectedselect([{ id: rowId, rowData }]);
     onRowClick?.(rowId, rowData);
   };
 
-  const onRowDblClick = (rowData :any) => {
+  const onRowDblClick = (rowData: any) => {
     if (setSelectedRows && selectValue) {
       setSelectedRows([{ id: rowData[selectValue], rowData }]);
     }

@@ -549,7 +549,7 @@ const Eselect = ({
       {open && !disabled && (
         <div 
           className="z-20 absolute shadow-darkshadow"
-          style={{ width: `${maxOptionWidth}px`, minWidth: '100%' }}
+          style={{ width: `${maxOptionWidth}px`, minWidth: '100%', maxWidth: 'min(100vw - 32px, 500px)' }}
         >
           <div className="flex items-center px-2 bg-white dark:bg-input rounded-md">
             <AiOutlineSearch size={16} className="text-gray-700 mt-3" />
